@@ -14,14 +14,18 @@ permissions:
 
 jobs:
   # Formatting and evaluation of the WSL system and every dev shell; nothing
-  # large is built.
+  # large is built. Pushes and dispatches on main run on AnkiQuest's
+  # self-hosted runners, which their runner group allows; pull requests
+  # and merge queue groups stay on GitHub's runners.
   flake:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.ref == 'refs/heads/main' && fromJSON('["self-hosted","Linux","X64","ankiquest","build"]') || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # The self-hosted runners bring their own single-user Nix.
       - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+        if: runner.environment == 'github-hosted'
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
