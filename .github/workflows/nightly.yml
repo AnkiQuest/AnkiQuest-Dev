@@ -1,0 +1,321 @@
+name: Nightly
+
+# Every push to main builds the nightly artifacts, as AnkiQuest-Android's
+# nightly does: the NixOS-WSL image and the Windows configuration in the
+# rolling `nightly` pre-release, the dev images on GHCR, and the dev shells
+# in the `ankiquest` Cachix cache. Pull requests that change them, and manual
+# runs on other branches, build without pushing or publishing.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - flake.nix
+      - flake.lock
+      - cache.nix
+      - images/**
+      - nixos/**
+      - shells/**
+      - windows/**
+      - .github/workflows/nightly.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push replaces every artifact, so an older run still building is
+# wasted.
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ankiquest-wsl.wsl
+  # GitHub refuses release assets of 2 GiB or more.
+  ASSET_LIMIT: 2147483648
+  WSL_CONFIG: .#nixosConfigurations.ankiquest-wsl-release.config
+  REGISTRY: ghcr.io/ankiquest
+  # Only main pushes images and cache paths and publishes the release.
+  PUBLISH: ${{ github.ref == 'refs/heads/main' }}
+  CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+jobs:
+  # The WSL image and the Windows configuration, for the release.
+  wsl:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    outputs:
+      system: ${{ steps.system.outputs.path }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # The system closure and its copy inside the image need more than the
+      # runner's free root disk; drop preinstalled SDKs this job doesn't use.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h / /mnt
+
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # Pulls always; pushes what this job builds only on main and only with
+      # the token, so a missing secret skips the push and nothing else.
+      - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: ankiquest
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: ${{ env.PUBLISH != 'true' || env.CACHIX_AUTH_TOKEN == '' }}
+
+      # The store path of the system goes into the notes, so a nightly can be
+      # rebuilt and compared from the same commit.
+      - name: Build the tarball builder
+        id: system
+        run: |
+          nix build --out-link builder "$WSL_CONFIG.system.build.tarballBuilder"
+          echo "path=$(nix eval --raw "$WSL_CONFIG.system.build.toplevel.outPath")" >> "$GITHUB_OUTPUT"
+
+      - name: Write the image
+        run: |
+          sudo mkdir -p /mnt/wsl-tmp
+          sudo env TMPDIR=/mnt/wsl-tmp ./builder/bin/nixos-wsl-tarball-builder "$IMAGE"
+          sudo chown "$(id -u):$(id -g)" "$IMAGE"
+
+      - name: Check the size
+        run: |
+          size=$(stat -c %s "$IMAGE")
+          echo "$IMAGE: $size bytes ($(numfmt --to=iec "$size"))"
+          if [ "$size" -ge "$ASSET_LIMIT" ]; then
+            echo "::error::$IMAGE is $(numfmt --to=iec "$size"), over GitHub's 2 GiB asset limit. Keep large shells out of ankiquest-wsl-release in flake.nix."
+            exit 1
+          fi
+
+      - name: Windows configuration
+        run: cp "$(nix build --no-link --print-out-paths .#windows-configuration)" configuration.dsc.yaml
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release
+          path: |
+            ${{ env.IMAGE }}
+            configuration.dsc.yaml
+          if-no-files-found: error
+          # The image is gzip already.
+          compression-level: 0
+          retention-days: 3
+
+  # Every dev shell's closure in the Cachix cache, on main only; pull
+  # requests only pull. Shells already in the cache are not built again.
+  cache:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check the token
+        id: token
+        run: |
+          if [ -z "$CACHIX_AUTH_TOKEN" ]; then
+            echo "::warning::No CACHIX_AUTH_TOKEN; the dev shells are not pushed"
+            exit 0
+          fi
+          echo "present=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: steps.token.outputs.present
+
+      - name: Free disk space
+        if: steps.token.outputs.present
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+        if: steps.token.outputs.present
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        if: steps.token.outputs.present
+        with:
+          name: ankiquest
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      # A shell's inputDerivation references everything the shell needs, so
+      # pushing it pushes the shell's closure.
+      - name: Build the dev shells
+        if: steps.token.outputs.present
+        run: |
+          system=$(nix eval --impure --raw --expr builtins.currentSystem)
+          for shell in $(nix eval --json ".#devShells.$system" --apply builtins.attrNames | jq -r '.[]'); do
+            out=$(nix eval --raw ".#devShells.$system.$shell.inputDerivation.outPath")
+            if nix path-info --store https://ankiquest.cachix.org "$out" > /dev/null 2>&1; then
+              echo "$shell: in the cache"
+              continue
+            fi
+            echo "$shell: building"
+            nix build --no-link ".#devShells.$system.$shell.inputDerivation"
+          done
+
+  # The dev images on GHCR. A shell whose image derivation matches the
+  # org.ankiquest.drv label of the last pushed nightly is not rebuilt; it
+  # only gets this commit's tag.
+  docker:
+    needs: cache
+    if: ${{ !cancelled() && needs.cache.result != 'failure' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digests: ${{ steps.images.outputs.digests }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo mkdir -p /mnt/images && sudo chown "$(id -u):$(id -g)" /mnt/images
+          df -h / /mnt
+
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: ankiquest
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: ${{ env.PUBLISH != 'true' || env.CACHIX_AUTH_TOKEN == '' }}
+
+      - name: Install skopeo
+        run: echo "$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#skopeo)/bin" >> "$GITHUB_PATH"
+
+      - name: Build and push the images
+        id: images
+        env:
+          CREDS: ${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}
+        run: |
+          digests=""
+          for shell in server desktop android anki; do
+            repo="$REGISTRY/ankiquest-dev-$shell"
+            want=$(nix eval --raw ".#image-$shell.ankiquestDrv")
+            have=$(skopeo inspect --creds "$CREDS" "docker://$repo:nightly" 2>/dev/null \
+              | jq -r '.Labels["org.ankiquest.drv"] // empty' || true)
+
+            # Unchanged: tag the nightly with this commit too.
+            if [ "$want" = "$have" ]; then
+              echo "$shell: unchanged"
+              if [ "$PUBLISH" = true ]; then
+                skopeo copy --preserve-digests --creds "$CREDS" --dest-creds "$CREDS" \
+                  "docker://$repo:nightly" "docker://$repo:$GITHUB_SHA"
+              fi
+              digest=$(skopeo inspect --creds "$CREDS" --format '{{.Digest}}' "docker://$repo:nightly")
+              digests+="$repo@$digest (unchanged)"$'\n'
+              continue
+            fi
+
+            # Changed: build; on main, stream it to a file and push both tags.
+            echo "$shell: building"
+            nix build --out-link "stream-$shell" ".#image-$shell"
+            if [ "$PUBLISH" != true ]; then
+              continue
+            fi
+            "./stream-$shell" > /mnt/images/image.tar
+            skopeo copy --dest-creds "$CREDS" --digestfile /mnt/images/digest \
+              docker-archive:/mnt/images/image.tar "docker://$repo:$GITHUB_SHA"
+            skopeo copy --preserve-digests --creds "$CREDS" --dest-creds "$CREDS" \
+              "docker://$repo:$GITHUB_SHA" "docker://$repo:nightly"
+            rm -f /mnt/images/image.tar "stream-$shell"
+            digests+="$repo@$(cat /mnt/images/digest)"$'\n'
+          done
+          {
+            echo "digests<<EOF"
+            printf '%s' "$digests"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: [wsl, docker]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+
+      - name: Notes and checksums
+        env:
+          SYSTEM: ${{ needs.wsl.outputs.system }}
+          DIGESTS: ${{ needs.docker.outputs.digests }}
+        run: |
+          built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          jq -n --arg commit "$GITHUB_SHA" --arg built_at "$built_at" \
+            --argjson size "$(stat -c %s "$IMAGE")" --arg system "$SYSTEM" \
+            --arg images "$DIGESTS" \
+            '{commit: $commit, built_at: $built_at, size: $size, system: $system,
+              images: ($images | split("\n") | map(select(. != "")))}' \
+            > nightly.json
+          sha256sum "$IMAGE" configuration.dsc.yaml nightly.json > SHA256SUMS
+          cat > notes.md <<EOF
+          Built from $GITHUB_SHA on $built_at. Untested.
+
+          WSL system: \`$SYSTEM\`
+
+          ## NixOS on WSL
+
+          In PowerShell:
+
+          \`\`\`powershell
+          wsl --install --no-distribution
+          wsl --update
+          wsl --install --from-file $IMAGE --name ankiquest
+          wsl -d ankiquest
+          \`\`\`
+
+          The user is \`hill\`. The image keeps no dev shells built; each one is
+          fetched on its first \`nix develop\`. To keep them all built, as
+          \`ankiquest.dev.shells\` lists, run once:
+
+          \`\`\`sh
+          sudo nixos-rebuild switch --flake github:AnkiQuest/AnkiQuest-Dev#ankiquest-wsl
+          \`\`\`
+
+          Then follow the README from "Clone the repositories".
+
+          ## Native Windows
+
+          In an elevated PowerShell:
+
+          \`\`\`powershell
+          winget configure --file configuration.dsc.yaml --accept-configuration-agreements
+          \`\`\`
+
+          ## Dev images
+
+          \`docker run -it -v "\$PWD:/work" ghcr.io/ankiquest/ankiquest-dev-<shell>:nightly\`
+
+          \`\`\`
+          $DIGESTS
+          \`\`\`
+          EOF
+
+      # Recreating the release moves the tag to this commit and drops the
+      # previous nightly's assets.
+      - name: Publish nightly
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete nightly --yes --cleanup-tag || true
+          gh release create nightly "$IMAGE" configuration.dsc.yaml nightly.json SHA256SUMS \
+            --prerelease --latest=false --target "$GITHUB_SHA" \
+            --title "AnkiQuest-Dev nightly" \
+            --notes-file notes.md

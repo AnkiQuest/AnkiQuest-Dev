@@ -1,0 +1,58 @@
+name: Labels
+
+# The labelling AnkiQuest repositories share, from AnkiQuest-Dev's reusable
+# workflows: the label set (labels.json there), "Has Conflicts", "Needs
+# Review", "New contributor", area labels from .github/labeler.yml and
+# "Needs Triage" on issues. Nothing here checks out or runs pull request code.
+
+on:
+  push:
+    branches: [master]
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft, closed]
+  pull_request_review:
+    types: [submitted, dismissed]
+  issues:
+    types: [opened, reopened, labeled, closed]
+  # A merge queue group has no pull request to label. Every job is skipped
+  # there, which counts as passing, so the queue never waits for them.
+  merge_group:
+    types: [checks_requested]
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  labels:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/labels.yml@master
+    permissions:
+      contents: read
+      issues: write
+
+  conflicts:
+    if: >-
+      contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event_name)
+      || (github.event_name == 'pull_request_target'
+        && contains(fromJSON('["opened", "reopened", "synchronize"]'), github.event.action))
+    uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/conflict-scan.yml@master
+    permissions:
+      contents: read
+      pull-requests: write
+
+  pull-requests:
+    if: github.event_name == 'pull_request_target' || github.event_name == 'pull_request_review'
+    uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/pr-labels.yml@master
+    permissions:
+      contents: read
+      pull-requests: write
+
+  issues:
+    if: github.event_name == 'issues'
+    uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/issue-labels.yml@master
+    permissions:
+      contents: read
+      issues: write

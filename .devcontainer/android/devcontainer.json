@@ -1,0 +1,7 @@
+{
+  "name": "AnkiQuest-Dev android",
+  "image": "ghcr.io/ankiquest/ankiquest-dev-android:nightly",
+  "remoteUser": "dev",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/work,type=bind",
+  "workspaceFolder": "/work"
+}

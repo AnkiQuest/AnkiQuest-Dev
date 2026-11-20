@@ -11,9 +11,9 @@
   # desktop tools pin nothing and build with it too.
   rustCurrent = "1.100.0";
 
-  # rust-toolchain.toml on the `ankiquest` branches of AnkiQuest/anki and
-  # AnkiQuest-Android-Backend.
-  rustAnki = "1.97.1";
+  # rust-toolchain.toml on master of AnkiQuest-Anki (ankitects/anki main)
+  # and AnkiQuest-Android-Backend.
+  rustAnki = "1.99.0";
 
   rustComponents = ["clippy" "rustfmt" "rust-src" "rust-analyzer"];
 

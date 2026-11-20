@@ -53,10 +53,10 @@ properties:
       settings:
         GetScript: "@{ Result = 'rust-toolchains' }"
         TestScript: |
-          (& "$env:USERPROFILE\.cargo\bin\rustup.exe" toolchain list) -match '^1.100.0-' -and (& "$env:USERPROFILE\.cargo\bin\rustup.exe" toolchain list) -match '^1.97.1-'
+          (& "$env:USERPROFILE\.cargo\bin\rustup.exe" toolchain list) -match '^1.100.0-' -and (& "$env:USERPROFILE\.cargo\bin\rustup.exe" toolchain list) -match '^1.99.0-'
         SetScript: |
           & "$env:USERPROFILE\.cargo\bin\rustup.exe" toolchain install 1.100.0 --profile minimal --component clippy,rustfmt,rust-src,rust-analyzer --target wasm32-unknown-unknown,aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
-          & "$env:USERPROFILE\.cargo\bin\rustup.exe" toolchain install 1.97.1 --profile minimal --component clippy,rustfmt,rust-src,rust-analyzer --target aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          & "$env:USERPROFILE\.cargo\bin\rustup.exe" toolchain install 1.99.0 --profile minimal --component clippy,rustfmt,rust-src,rust-analyzer --target aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
     - resource: PSDscResources/Script
       id: python
       dependsOn:

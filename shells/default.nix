@@ -102,13 +102,20 @@
         '';
       });
 in {
-  # This repository: formatting and the GitHub CLI.
+  # This repository, AnkiQuest-Sync and AnkiQuest-Agents: Nix, workflows
+  # and the GitHub CLI.
   default = pkgs.mkShell {
-    packages = with pkgs; [alejandra gh nixd];
+    packages = with pkgs; [actionlint alejandra gh jq nixd];
   };
 
-  # AnkiQuest-Server and AnkiQuest.github.io: the server, the web pages,
-  # crates/rules and its Kotlin and Python bindings.
+  # AnkiQuest.github.io: the gallery build (Node 22.18 or later, cwebp for
+  # the previews). The server shell would bring Rust and the JBR for nothing.
+  gallery = pkgs.mkShell {
+    packages = [nodejs pkgs.libwebp];
+  };
+
+  # AnkiQuest-Server: the server, the web pages, crates/rules and its Kotlin
+  # and Python bindings.
   server = pkgs.mkShell (jvmEnv
     // {
       packages = with pkgs; [
@@ -141,8 +148,8 @@ in {
     ];
   };
 
-  # AnkiQuest-Android, ankiquest-android-mcp, AnkiQuestconnectAndroid and
-  # garmankiquest's companion: platforms and build tools, no NDK.
+  # AnkiQuest-Android, AnkiQuest-Android-MCP, AnkiQuest-AnkiConnectAndroid
+  # and AnkiQuest-GarmAnki's companion: platforms and build tools, no NDK.
   android = androidShell {sdk = "app";};
   android-emulator = androidShell {sdk = "emulator";};
 
@@ -158,7 +165,7 @@ in {
       };
   };
 
-  # AnkiQuest/anki: ./ninja, ./run and just.
+  # AnkiQuest-Anki: ./ninja, ./run and just.
   anki = pkgs.mkShell (ankiBuildEnv
     // {
       packages = [rust.anki] ++ ankiBuildTools;
