@@ -5,7 +5,8 @@
   lib,
   toolchains,
 }: let
-  inherit (toolchains) jbr rust;
+  inherit (toolchains) jbr rust nodejs python;
+  inherit (pkgs.stdenv.hostPlatform) isLinux;
 
   # Gradle may not download a JDK: the ones foojay offers are linked for a
   # usual Linux. The local JBR is the toolchain and the daemon JVM.
@@ -21,7 +22,7 @@
   # are. Python stays a uv-managed CPython from .python-version, which runs
   # through nix-ld like the PyQt wheels it loads.
   ankiBuildEnv = {
-    NODE_BINARY = lib.getExe pkgs.nodejs_22;
+    NODE_BINARY = lib.getExe nodejs;
     YARN_BINARY = lib.getExe pkgs.yarn-berry;
     PROTOC_BINARY = lib.getExe pkgs.protobuf;
     PROTOC = lib.getExe pkgs.protobuf;
@@ -33,7 +34,7 @@
     just
     n2
     ninja
-    nodejs_22
+    nodejs
     openssl
     pkg-config
     protobuf
@@ -61,34 +62,28 @@
     done
   '';
 
-  # The Android shell for an SDK with or without the emulator.
-  androidShell = emulator: let
-    sdkRoot = "${toolchains.androidSdk.${emulator}}/libexec/android-sdk";
+  # An Android shell around one of the SDKs in toolchains.androidSdk.
+  androidShell = {
+    sdk,
+    packages ? [],
+    env ? {},
+  }: let
+    sdkPackage = toolchains.androidSdk.${sdk};
+    sdkRoot = "${sdkPackage}/libexec/android-sdk";
   in
     pkgs.mkShell (jvmEnv
-      // ankiBuildEnv
+      // env
       // {
-        packages =
-          [
-            jbr
-            toolchains.androidSdk.${emulator}
-            rust.anki
-            rustupTargets
-            pkgs.cargo-ndk
-          ]
-          ++ ankiBuildTools;
+        packages = [jbr sdkPackage nodejs] ++ packages;
         ANDROID_HOME = sdkRoot;
         ANDROID_SDK_ROOT = sdkRoot;
-        # The NDK the backend builds with; NDK r28c is next to it in ndk/.
-        ANDROID_NDK_HOME = "${sdkRoot}/ndk/${toolchains.ndkBackend}";
-        GRADLE_OPTS = lib.concatStringsSep " " [
-          jvmEnv.GRADLE_OPTS
+        GRADLE_OPTS = lib.concatStringsSep " " ([jvmEnv.GRADLE_OPTS]
           # The aapt2 AGP fetches from Maven is linked for a usual Linux, so
-          # use the SDK's own.
-          "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/${toolchains.aapt2BuildTools}/aapt2"
-        ];
+          # use the SDK's own. On macOS Maven's runs.
+          ++ lib.optional isLinux
+          "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/${toolchains.aapt2BuildTools}/aapt2");
         # The Rust backend's test library expects libstdc++ and libgcc_s.
-        LD_LIBRARY_PATH = lib.makeLibraryPath [pkgs.stdenv.cc.cc.lib];
+        LD_LIBRARY_PATH = lib.optionalString isLinux (lib.makeLibraryPath [pkgs.stdenv.cc.cc.lib]);
         # stdenv sets SOURCE_DATE_EPOCH to 1980 when unset, and Gradle reads
         # it as the build time.
         shellHook = ''
@@ -110,10 +105,10 @@ in {
         cargo-ndk
         esbuild
         lld
-        nodejs_22
+        nodejs
         pkg-config
         sqlite
-        python313
+        python.server
         uv
         jbr
         gradle_9
@@ -126,19 +121,31 @@ in {
   # AnkiQuest-Desktop: the add-on tests, pyflakes, the packager and xtask.
   # Real-Anki tests run in a uv venv from tests/requirements-anki-*.txt.
   desktop = pkgs.mkShell {
-    packages = with pkgs; [
+    packages = [
       rust.current
-      nodejs_22
-      python312
-      python312Packages.pyflakes
-      uv
+      nodejs
+      python.desktop
+      python.desktop.pkgs.pyflakes
+      pkgs.uv
     ];
   };
 
-  # AnkiQuest-Android, AnkiQuest-Android-Backend, ankiquest-android-mcp,
-  # AnkiQuestconnectAndroid and garmankiquest's companion.
-  android = androidShell "excluded";
-  android-emulator = androidShell "included";
+  # AnkiQuest-Android, ankiquest-android-mcp, AnkiQuestconnectAndroid and
+  # garmankiquest's companion: platforms and build tools, no NDK.
+  android = androidShell {sdk = "app";};
+  android-emulator = androidShell {sdk = "emulator";};
+
+  # AnkiQuest-Android-Backend: the app SDK plus NDK r28c and r29, Rust for
+  # the Android targets and Anki's build tools.
+  android-backend = androidShell {
+    sdk = "backend";
+    packages = [rust.anki rustupTargets pkgs.cargo-ndk] ++ ankiBuildTools;
+    env =
+      ankiBuildEnv
+      // {
+        ANDROID_NDK_HOME = "${toolchains.androidSdk.backend}/libexec/android-sdk/ndk/${toolchains.ndkBackend}";
+      };
+  };
 
   # AnkiQuest/anki: ./ninja, ./run and just.
   anki = pkgs.mkShell (ankiBuildEnv
