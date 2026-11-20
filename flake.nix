@@ -170,6 +170,10 @@
     checks = forAllSystems (pkgs: {
       formatting = formatCheck pkgs self;
 
+      # No job can send pull_request code to the self-hosted runners.
+      runner-routing = pkgs.callPackage ./checks/runners.nix {} ./.github/workflows;
+      runner-routing-cases = pkgs.callPackage ./checks/runner-cases.nix {};
+
       # The checked-in Windows configuration is the generated one.
       windows-configuration = pkgs.runCommand "windows-configuration-check" {} ''
         diff -u ${./windows/configuration.dsc.yaml} ${self.packages.${pkgs.stdenv.hostPlatform.system}.windows-configuration}
