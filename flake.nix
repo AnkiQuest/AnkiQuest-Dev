@@ -91,10 +91,12 @@
         modules = [./nixos/hosts/${hostName}/configuration.nix];
       };
   in {
-    # For other flakes: the pins as plain values, the formatter check, and
-    # the toolchains as an overlay (pkgs.ankiquest).
+    # For other flakes: the systems the shells exist for, the pins as plain
+    # values, the formatter check, and the toolchains as an overlay
+    # (pkgs.ankiquest).
     lib = {
       inherit formatCheck;
+      systems = supportedSystems;
       versions = (pkgsFor "x86_64-linux").ankiquest.versions;
     };
 
