@@ -1,12 +1,13 @@
 # NixOS on WSL with everything the AnkiQuest repositories build with.
 {
+  self,
   username,
   nixos-wsl,
   ...
 }: {
   imports = [
     nixos-wsl.nixosModules.default
-    ../../roles/dev.nix
+    self.nixosModules.ankiquest-dev
   ];
 
   system.stateVersion = "26.05";
@@ -24,5 +25,26 @@
   networking.hostName = "ankiquest-wsl";
   time.timeZone = "Europe/Berlin";
 
-  ankiquest.dev.shells = ["server" "desktop" "android" "anki"];
+  nix = {
+    settings = {
+      trusted-users = ["root" username];
+      auto-optimise-store = true;
+    };
+    # nix-direnv roots each repository's shell, so collection only removes
+    # shells no checkout uses any more.
+    gc = {
+      automatic = true;
+      dates = "weekly";
+      options = "--delete-older-than 14d";
+    };
+  };
+
+  # /tmp stays on the WSL disk, not in memory: Gradle, Kotlin and Nix builds
+  # put several GB there.
+  boot.tmp = {
+    useTmpfs = false;
+    cleanOnBoot = true;
+  };
+
+  ankiquest.dev.shells = ["server" "desktop" "android" "android-backend" "anki"];
 }
