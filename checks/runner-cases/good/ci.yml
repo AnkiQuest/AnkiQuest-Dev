@@ -12,3 +12,5 @@ jobs:
     runs-on: ${{ matrix.os }}
   local:
     uses: ./.github/workflows/other.yml
+  shared:
+    uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/labels.yml@main

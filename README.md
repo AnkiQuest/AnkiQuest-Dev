@@ -362,7 +362,7 @@ AGPL-3.0-or-later ([LICENSE](LICENSE)).
 
 Workflows more than one repository runs are reusable workflows in
 `.github/workflows/`, called with
-`uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/<name>.yml@master`:
+`uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/<name>.yml@main`:
 
 | Workflow | Does | Inputs |
 |---|---|---|

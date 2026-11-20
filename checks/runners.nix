@@ -6,13 +6,18 @@
 # file, or the routing expression: self-hosted for merge groups and
 # pushes to the default branch, GitHub-hosted for every other event,
 # pull_request and pull_request_target included. Anything else fails,
-# as do reusable workflows from other repositories. The same rules as
-# crates/xtask's runners test in AnkiQuest-Server and AnkiQuest-Desktop.
+# as do reusable workflows from other repositories, except
+# AnkiQuest-Dev's own on its default branch, main: this check guards
+# their runs-on there, and only reviewed code reaches main. The same
+# rules as crates/xtask's runners test in AnkiQuest-Server and
+# AnkiQuest-Desktop.
 {
   lib,
   runCommand,
 }: workflows: let
   selfHostedEvents = "(github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)))";
+  # AnkiQuest-Dev's reusable workflows on main, which every repository calls.
+  shared = uses: builtins.match "AnkiQuest/AnkiQuest-Dev/\\.github/workflows/[A-Za-z0-9_.-]+\\.ya?ml@main" uses != null;
   hosted = label: builtins.match "(ubuntu|macos|windows)-[A-Za-z0-9.-]+" label != null;
 
   # A line's value after `key:`, without a trailing comment, or null.
@@ -58,7 +63,7 @@
   problems = name: let
     text = builtins.readFile (workflows + "/${name}");
     runsOn = map (runsOnProblem text) (values "runs-on" text);
-    remote = builtins.filter (uses: lib.hasInfix ".github/workflows/" uses && !(lib.hasPrefix "./" uses)) (values "uses" text);
+    remote = builtins.filter (uses: lib.hasInfix ".github/workflows/" uses && !(lib.hasPrefix "./" uses) && !(shared uses)) (values "uses" text);
   in
     map (problem: "${name}: ${problem}") (builtins.filter (p: p != null && p != "") runsOn ++ map (uses: "reusable workflow ${uses} is not local") remote);
 
