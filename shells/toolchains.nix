@@ -59,8 +59,10 @@
 
   # gradle/gradle-daemon-jvm.properties asks for a JetBrains 21 runtime and
   # nixpkgs only builds the newest JBR, so take JetBrains' own build. The same
-  # build and hashes as AnkiQuest-Android's flake.nix had. nixpkgs no longer
-  # supports x86_64-darwin, so there is no osx-x64 entry.
+  # build and hashes as AnkiQuest-Android's flake.nix had. osx-x64 has no
+  # entry yet: its hash could not be fetched when Intel Macs were added. Until
+  # then, Intel Macs get nixpkgs' JDK 21 and Gradle
+  # downloads the JBR itself, which works on macOS.
   jbrBuild = "21.0.11-b1163.125";
   jbrDownloads = {
     x86_64-linux = {
@@ -109,6 +111,7 @@
           x86_64-linux = "x86_64";
           aarch64-linux = "arm64-v8a";
           aarch64-darwin = "arm64-v8a";
+          x86_64-darwin = "x86_64";
         }
         .${
           system
@@ -117,7 +120,14 @@
     })
     .androidsdk;
 
-  jbr = let
+  # Where the JVM comes from: "nix" (the JBR above) or "gradle" (a JDK 21
+  # from nixpkgs to start Gradle, which provisions its daemon JVM).
+  jvmSource =
+    if jbrDownloads ? ${system}
+    then "nix"
+    else "gradle";
+
+  jbrBuildFromJetBrains = let
     download = jbrDownloads.${system};
     version = lib.head (lib.splitString "-" jbrBuild);
     build = lib.last (lib.splitString "-" jbrBuild);
@@ -155,8 +165,16 @@
         runHook postInstall
       '';
     };
+  jbr =
+    {
+      nix = jbrBuildFromJetBrains;
+      gradle = pkgs.jdk21;
+    }
+    .${
+      jvmSource
+    };
 in {
-  inherit jbr aapt2BuildTools ndkRules ndkBackend nodejs python;
+  inherit jbr jvmSource aapt2BuildTools ndkRules ndkBackend nodejs python;
 
   rust = {
     current = rustWith rustCurrent (["wasm32-unknown-unknown"] ++ androidRustTargets);
