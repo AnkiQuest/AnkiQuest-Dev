@@ -84,24 +84,36 @@
       android-sdk = toolchains.androidSdk.excluded;
     });
 
-    nixosConfigurations.ankiquest-wsl = mkNixosConfig {hostName = "ankiquest-wsl";};
+    nixosConfigurations = {
+      ankiquest-wsl = mkNixosConfig {hostName = "ankiquest-wsl";};
 
-    checks = forAllSystems (pkgs: {
-      formatting =
-        pkgs.runCommand "alejandra-check" {
-          nativeBuildInputs = [pkgs.alejandra];
-          src = self;
-        } ''
-          alejandra --check "$src"
-          touch "$out"
-        '';
+      # The image the nightly release publishes: ankiquest-wsl without kept
+      # dev shells, so the .wsl file stays under GitHub's 2 GiB asset limit.
+      # Shells build on first `nix develop`, or all at once after
+      # `nixos-rebuild switch` to ankiquest-wsl.
+      ankiquest-wsl-release = self.nixosConfigurations.ankiquest-wsl.extendModules {
+        modules = [{ankiquest.dev.shells = lib.mkForce [];}];
+      };
+    };
 
-      # Evaluates the WSL system without building it: the store path of its
-      # derivation, with the dependency on it dropped.
-      ankiquest-wsl = let
-        drvPath = self.nixosConfigurations.ankiquest-wsl.config.system.build.toplevel.drvPath;
+    checks = forAllSystems (pkgs:
+      {
+        formatting =
+          pkgs.runCommand "alejandra-check" {
+            nativeBuildInputs = [pkgs.alejandra];
+            src = self;
+          } ''
+            alejandra --check "$src"
+            touch "$out"
+          '';
+      }
+      # Evaluates each WSL system and its image builder without building
+      # them: the store path of the builder's derivation, with the dependency
+      # on it dropped.
+      // lib.mapAttrs (name: system: let
+        drvPath = system.config.system.build.tarballBuilder.drvPath;
       in
-        pkgs.writeText "ankiquest-wsl-eval" (builtins.unsafeDiscardStringContext drvPath);
-    });
+        pkgs.writeText "${name}-eval" (builtins.unsafeDiscardStringContext drvPath))
+      self.nixosConfigurations);
   };
 }
