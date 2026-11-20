@@ -316,3 +316,7 @@ cannot evaluate `x86_64-darwin`.
 `overlays.default` adds the pinned toolchains as `pkgs.ankiquest` (`jbr`,
 `rust.current`, `rust.anki`, `androidSdk.{app,emulator,backend}`), and
 `lib.versions` holds the pins as plain values.
+
+## Licence
+
+AGPL-3.0-or-later ([LICENSE](LICENSE)).
