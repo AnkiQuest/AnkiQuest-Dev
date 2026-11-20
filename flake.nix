@@ -112,6 +112,11 @@
 
     overlays.default = overlay;
 
+    # The package sets the shells use, with the overlay: nixpkgs 26.11, or
+    # 26.05 on x86_64-darwin. Other flakes that loop over lib.systems take
+    # pkgs from here, since their own nixpkgs cannot evaluate x86_64-darwin.
+    legacyPackages = forAllSystems (pkgs: pkgs);
+
     formatter = forAllSystems (pkgs: pkgs.alejandra);
 
     devShells = forAllSystems shellsFor;

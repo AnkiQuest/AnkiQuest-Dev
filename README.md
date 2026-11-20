@@ -309,6 +309,10 @@ formatter = ankiquest-dev.formatter;
 checks.${system}.formatting = ankiquest-dev.lib.formatCheck pkgs ./.;
 ```
 
+A flake that loops over `ankiquest-dev.lib.systems` takes `pkgs` from
+`ankiquest-dev.legacyPackages.${system}`, not from its own nixpkgs, which
+cannot evaluate `x86_64-darwin`.
+
 `overlays.default` adds the pinned toolchains as `pkgs.ankiquest` (`jbr`,
 `rust.current`, `rust.anki`, `androidSdk.{app,emulator,backend}`), and
 `lib.versions` holds the pins as plain values.
