@@ -1,0 +1,65 @@
+# Reusable CI for the Android app forks (AnkiQuest-AnkiConnectAndroid,
+# AnkiQuest-Android-MCP, AnkiQuest-GarmAnki):
+#   gradle: build, lint and unit tests with Temurin 17, as upstream builds.
+#   nix:    the repository's `nix flake check` and a debug build in its dev
+#           shell (the android-app shell of this repository).
+#
+# Call it from a workflow with the repository's own triggers:
+#   jobs:
+#     ci:
+#       uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/android-ci.yml@master
+#       with:
+#         working-directory: android
+name: Android CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: The Gradle project's directory.
+        type: string
+        default: .
+      jobs:
+        description: The jobs to run, space-separated; "gradle nix" or one of them.
+        type: string
+        default: gradle nix
+
+permissions:
+  contents: read
+
+jobs:
+  gradle:
+    if: contains(inputs.jobs, 'gradle')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      - run: ./gradlew assembleDebug lintDebug testDebugUnitTest
+
+  nix:
+    if: contains(inputs.jobs, 'nix')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - run: nix flake check
+      - name: Build in the dev shell
+        env:
+          DIR: ${{ inputs.working-directory }}
+        run: nix develop -c "$DIR/gradlew" -p "$DIR" assembleDebug
