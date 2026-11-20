@@ -38,7 +38,7 @@ work. Repositories are then cloned and entered as in
 
 ## Binary cache
 
-Every push to `main` puts the shells' closures for `x86_64-linux` in the
+Every push to `master` puts the shells' closures for `x86_64-linux` in the
 Cachix cache `ankiquest`, so entering a shell downloads instead of building.
 The NixOS and nix-darwin modules trust it; the flake offers it as
 `nixConfig`, which Nix uses for trusted users or with `--accept-flake-config`.
@@ -147,7 +147,7 @@ those.
 
 The nightly workflow publishes one image per shell, built with Nix:
 `ghcr.io/ankiquest/ankiquest-dev-{server,desktop,android,anki}`, tagged
-`nightly` and with each commit of `main`. Each holds the shell's environment,
+`nightly` and with each commit of `master`. Each holds the shell's environment,
 a user `dev` and `/work`:
 
 ```sh
@@ -178,7 +178,7 @@ wsl --update
 
 Then download `ankiquest-wsl.wsl` from the
 [nightly release](https://github.com/AnkiQuest/AnkiQuest-Dev/releases/tag/nightly),
-built from every commit to `main`, check it against `SHA256SUMS`, and import
+built from every commit to `master`, check it against `SHA256SUMS`, and import
 it:
 
 ```powershell
@@ -362,7 +362,7 @@ AGPL-3.0-or-later ([LICENSE](LICENSE)).
 
 Workflows more than one repository runs are reusable workflows in
 `.github/workflows/`, called with
-`uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/<name>.yml@main`:
+`uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/<name>.yml@master`:
 
 | Workflow | Does | Inputs |
 |---|---|---|

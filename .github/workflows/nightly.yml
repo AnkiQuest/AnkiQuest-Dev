@@ -1,13 +1,13 @@
 name: Nightly
 
-# Every push to main builds the nightly artifacts, as AnkiQuest-Android's
+# Every push to master builds the nightly artifacts, as AnkiQuest-Android's
 # nightly does: the NixOS-WSL image and the Windows configuration in the
 # rolling `nightly` pre-release, the dev images on GHCR, and the dev shells
 # in the `ankiquest` Cachix cache. Pull requests that change them, and manual
 # runs on other branches, build without pushing or publishing.
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
     paths:
       - flake.nix
@@ -35,8 +35,8 @@ env:
   ASSET_LIMIT: 2147483648
   WSL_CONFIG: .#nixosConfigurations.ankiquest-wsl-release.config
   REGISTRY: ghcr.io/ankiquest
-  # Only main pushes images and cache paths and publishes the release.
-  PUBLISH: ${{ github.ref == 'refs/heads/main' }}
+  # Only master pushes images and cache paths and publishes the release.
+  PUBLISH: ${{ github.ref == 'refs/heads/master' }}
   CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
 jobs:
@@ -61,7 +61,7 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      # Pulls always; pushes what this job builds only on main and only with
+      # Pulls always; pushes what this job builds only on master and only with
       # the token, so a missing secret skips the push and nothing else.
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
         with:
@@ -106,10 +106,10 @@ jobs:
           compression-level: 0
           retention-days: 3
 
-  # Every dev shell's closure in the Cachix cache, on main only; pull
+  # Every dev shell's closure in the Cachix cache, on master only; pull
   # requests only pull. Shells already in the cache are not built again.
   cache:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -219,7 +219,7 @@ jobs:
               continue
             fi
 
-            # Changed: build; on main, stream it to a file and push both tags.
+            # Changed: build; on master, stream it to a file and push both tags.
             echo "$shell: building"
             nix build --out-link "stream-$shell" ".#image-$shell"
             if [ "$PUBLISH" != true ]; then
@@ -241,7 +241,7 @@ jobs:
 
   publish:
     needs: [wsl, docker]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
