@@ -1,6 +1,13 @@
 {
   description = "AnkiQuest development environment: dev shells, NixOS on WSL, NixOS and nix-darwin modules";
 
+  # AnkiQuest's Cachix cache, the same values as cache.nix. Nix asks before
+  # using them unless the user is trusted or accepts flake config.
+  nixConfig = {
+    extra-substituters = ["https://ankiquest.cachix.org"];
+    extra-trusted-public-keys = ["ankiquest.cachix.org-1:dX/Nw24o2NazxbWxwc2Fmav2YpCkBSMiQIpaNHhH4gY="];
+  };
+
   inputs = {
     # The channel tarball of nixos-unstable, the same nixpkgs float3/nixos
     # locks.
@@ -123,20 +130,28 @@
 
     # The pinned toolchains on their own, for other flakes and for
     # `nix build .#android-sdk`; the generated Windows configuration; the
-    # dev container's profile.
+    # dev container's profile; the dev images.
     packages = forAllSystems (pkgs: let
       toolchains = pkgs.ankiquest;
-    in {
-      inherit (toolchains) jbr;
-      rust = toolchains.rust.current;
-      rust-anki = toolchains.rust.anki;
-      android-sdk = toolchains.androidSdk.app;
-      android-sdk-ndk = toolchains.androidSdk.backend;
-      windows-configuration = import ./windows {
-        inherit pkgs lib toolchains;
-      };
-      devcontainer = import ./.devcontainer {inherit pkgs;};
-    });
+    in
+      {
+        inherit (toolchains) jbr;
+        rust = toolchains.rust.current;
+        rust-anki = toolchains.rust.anki;
+        android-sdk = toolchains.androidSdk.app;
+        android-sdk-ndk = toolchains.androidSdk.backend;
+        windows-configuration = import ./windows {
+          inherit pkgs lib toolchains;
+        };
+        devcontainer = import ./.devcontainer {inherit pkgs;};
+      }
+      # The dev images, as image-<shell>: a script that streams the image to
+      # stdout (`$(nix build --print-out-paths .#image-android) | docker load`).
+      // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (lib.mapAttrs' (name: lib.nameValuePair "image-${name}")
+        (import ./images {
+          inherit pkgs lib;
+          shells = shellsFor pkgs;
+        })));
 
     # What a machine needs for the AnkiQuest checkouts: flakes, direnv, git,
     # gh and, on NixOS, nix-ld and kept dev shells (ankiquest.dev.shells).
@@ -175,6 +190,15 @@
         diff -u ${./windows/configuration.dsc.yaml} ${self.packages.${pkgs.stdenv.hostPlatform.system}.windows-configuration}
         touch "$out"
       '';
+
+      # flake.nix's nixConfig names the same cache as cache.nix.
+      cache-config = let
+        cache = import ./cache.nix;
+        inherit ((import ./flake.nix).nixConfig) extra-substituters extra-trusted-public-keys;
+      in
+        assert extra-substituters == [cache.substituter];
+        assert extra-trusted-public-keys == [cache.publicKey];
+          pkgs.writeText "cache-config" cache.substituter;
 
       # The WSL systems' image builders and a nix-darwin system with the
       # module, evaluated without building them.

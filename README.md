@@ -31,12 +31,25 @@ follows. The shells exist for `x86_64-linux`, `aarch64-linux`,
 | macOS (Apple silicon, Intel) | [Nix and the shells](#macos), optionally nix-darwin | `nix develop github:AnkiQuest/AnkiQuest-Dev#desktop --command rustc --version` |
 | Windows, WSL | [NixOS on WSL](#install-nixos-on-wsl) | `wsl -d ankiquest -- nix develop github:AnkiQuest/AnkiQuest-Dev#desktop --command rustc --version` |
 | Windows, native | [winget](#windows) | `rustup run 1.100.0 rustc --version; node --version; uv python list --only-installed; java -version; & "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat" --list_installed` |
-| Any OS with Docker or Podman | [the dev container](#dev-container) | `nix develop .#desktop --command rustc --version` in the container |
+| Any OS with Docker or Podman | [the dev images](#dev-container) | `docker run --rm ghcr.io/ankiquest/ankiquest-dev-desktop:nightly rustc --version` |
 
 `rustc 1.100.0` from the shell means Nix, the flake and the pinned toolchain
 work. Repositories are then cloned and entered as in
 [Clone the repositories](#clone-the-repositories) and
 [Enter a shell with direnv](#enter-a-shell-with-direnv).
+
+## Binary cache
+
+Every push to `main` puts the shells' closures for `x86_64-linux` in the
+Cachix cache `ankiquest`, so entering a shell downloads instead of building.
+The NixOS and nix-darwin modules trust it; the flake offers it as
+`nixConfig`, which Nix uses for trusted users or with `--accept-flake-config`.
+Elsewhere, add it to `/etc/nix/nix.conf`:
+
+```
+extra-substituters = https://ankiquest.cachix.org
+extra-trusted-public-keys = ankiquest.cachix.org-1:dX/Nw24o2NazxbWxwc2Fmav2YpCkBSMiQIpaNHhH4gY=
+```
 
 ## Ubuntu and other Linux
 
@@ -119,7 +132,9 @@ Native Windows uses no Nix: `windows/configuration.dsc.yaml` installs Git,
 rustup with the pinned toolchains and targets, Node, uv with the pinned Python
 versions, a JDK 21 for Gradle, the Android command-line tools and the SDK
 packages the shells carry. The versions are generated from
-`shells/toolchains.nix`. In an elevated PowerShell, from a checkout:
+`shells/toolchains.nix`. Download it from the
+[nightly release](https://github.com/AnkiQuest/AnkiQuest-Dev/releases/tag/nightly)
+or use the one in a checkout. In an elevated PowerShell:
 
 ```powershell
 winget configure --file windows\configuration.dsc.yaml --accept-configuration-agreements
@@ -132,11 +147,27 @@ those.
 
 ## Dev container
 
-`.devcontainer/` is an Ubuntu image with Nix and direnv from this flake, for
+The nightly workflow publishes one image per shell, built with Nix:
+`ghcr.io/ankiquest/ankiquest-dev-{server,desktop,android,anki}`, tagged
+`nightly` and with each commit of `main`. Each holds the shell's environment,
+a user `dev` and `/work`:
+
+```sh
+docker run -it -v "$PWD:/work" ghcr.io/ankiquest/ankiquest-dev-android:nightly
+```
+
+`.devcontainer/<shell>/devcontainer.json` opens a checkout in one of them, for
 VS Code, JetBrains Gateway, `devcontainer up` or anything else that reads
-`devcontainer.json`, on Docker or Podman. Open this repository in it; clone the
-other repositories under `/workspaces` and enter them with `.envrc` as below.
-The emulator does not run in the container.
+`devcontainer.json`, on Docker or Podman; copy it into another repository's
+`.devcontainer/` to use it there. Binaries Gradle, npm and uv download run
+through nix-ld, as on NixOS.
+
+The alternative is `.devcontainer/nix/`: an Ubuntu image with Nix and direnv
+from this flake, which builds the shells itself. Open this repository in it;
+clone the other repositories under `/workspaces` and enter them with `.envrc`
+as below. Use it for `android-backend` and `android-emulator`, which have no
+image, or to try local changes to the shells. The emulator does not run in a
+container.
 
 ## Install NixOS on WSL
 
