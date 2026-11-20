@@ -211,7 +211,7 @@ jobs:
             if [ "$want" = "$have" ]; then
               echo "$shell: unchanged"
               if [ "$PUBLISH" = true ]; then
-                skopeo copy --preserve-digests --creds "$CREDS" --dest-creds "$CREDS" \
+                skopeo copy --preserve-digests --src-creds "$CREDS" --dest-creds "$CREDS" \
                   "docker://$repo:nightly" "docker://$repo:$GITHUB_SHA"
               fi
               digest=$(skopeo inspect --creds "$CREDS" --format '{{.Digest}}' "docker://$repo:nightly")
@@ -228,7 +228,7 @@ jobs:
             "./stream-$shell" > /mnt/images/image.tar
             skopeo copy --dest-creds "$CREDS" --digestfile /mnt/images/digest \
               docker-archive:/mnt/images/image.tar "docker://$repo:$GITHUB_SHA"
-            skopeo copy --preserve-digests --creds "$CREDS" --dest-creds "$CREDS" \
+            skopeo copy --preserve-digests --src-creds "$CREDS" --dest-creds "$CREDS" \
               "docker://$repo:$GITHUB_SHA" "docker://$repo:nightly"
             rm -f /mnt/images/image.tar "stream-$shell"
             digests+="$repo@$(cat /mnt/images/digest)"$'\n'
