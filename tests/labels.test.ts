@@ -33,6 +33,13 @@ function labellingWorkflows(): string[] {
   return fs.readdirSync(workflows).filter(file => /\.ya?ml$/.test(file) && LABELLING.test(read(file)));
 }
 
+// Area labels are the top-level keys of this repository's labeler config,
+// which the area job of pr-labels.yml requires.
+function labelerNames(): string[] {
+  const text = fs.readFileSync(path.join(root, '.github', 'labeler.yml'), 'utf8');
+  return [...text.matchAll(/^([A-Za-z_][^:\n]*):$/gm)].map(match => match[1]);
+}
+
 // The conflict scan, an action so the calling job keeps the name "scan".
 const CONFLICT_SCAN = path.join(root, '.github', 'actions', 'conflict-scan', 'action.yml');
 
@@ -133,7 +140,7 @@ test('labels.json entries are well formed and unique ignoring case', () => {
 
 test('labels.json holds every label the workflows apply, spelled the same', () => {
   const names = new Set(labels.map(label => label.name));
-  const used = [...workflowNames(), ...DEPENDABOT];
+  const used = [...workflowNames(), ...labelerNames(), ...DEPENDABOT];
   assert.ok(workflowNames().length > 0);
   for (const name of used) {
     assert.ok(names.has(name), `${name} is missing from labels.json`);

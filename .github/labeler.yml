@@ -1,0 +1,25 @@
+# Area labels for pull requests, applied by actions/labeler in the reusable
+# pr-labels.yml. A label is removed again when a later push no longer touches
+# its paths; labels not listed here are never touched. Each AnkiQuest
+# repository has its own paths; every label here must be in labels.json.
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**
+          - .devcontainer/**
+          - "**/*.nix"
+          - flake.lock
+          - checks/**
+          - windows/**
+          - images/**
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - tests/**
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
