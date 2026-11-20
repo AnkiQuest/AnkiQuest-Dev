@@ -1,11 +1,18 @@
 name: WSL nightly
 
 # Every push to main builds the NixOS-WSL image and moves the rolling
-# `nightly` pre-release to it, as AnkiQuest-Android's nightly does. A manual
-# run on another branch builds and uploads the image as an artifact only.
+# `nightly` pre-release to it, as AnkiQuest-Android's nightly does. Pull
+# requests that change the image and manual runs on other branches build and
+# upload it as an artifact only, so the size limit is checked before merging.
 on:
   push:
     branches: [main]
+  pull_request:
+    paths:
+      - flake.nix
+      - flake.lock
+      - nixos/**
+      - .github/workflows/wsl-nightly.yml
   workflow_dispatch:
 
 permissions:
