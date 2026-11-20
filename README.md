@@ -19,9 +19,8 @@ AnkiQuest-Sync and AnkiQuest-Agents hold only workflows and Markdown and need
 no shell.
 
 Every version is in `shells/toolchains.nix`, next to the repository file it
-follows. The shells exist for `x86_64-linux`, `aarch64-linux` and
-`aarch64-darwin`. nixpkgs dropped `x86_64-darwin` in 26.11, so Intel Macs use
-the dev container.
+follows. The shells exist for `x86_64-linux`, `aarch64-linux`,
+`aarch64-darwin` and `x86_64-darwin` (see [Intel Macs](#intel-macs)).
 
 ## Pick a setup
 
@@ -29,7 +28,7 @@ the dev container.
 |---|---|---|
 | Ubuntu, other Linux | [Nix and the shells](#ubuntu-and-other-linux) | `nix develop github:AnkiQuest/AnkiQuest-Dev#desktop --command rustc --version` |
 | NixOS | [the NixOS module](#nixos) | `direnv version && nix develop github:AnkiQuest/AnkiQuest-Dev#desktop --command rustc --version` |
-| macOS (Apple silicon) | [Nix and the shells](#macos), optionally nix-darwin | `nix develop github:AnkiQuest/AnkiQuest-Dev#desktop --command rustc --version` |
+| macOS (Apple silicon, Intel) | [Nix and the shells](#macos), optionally nix-darwin | `nix develop github:AnkiQuest/AnkiQuest-Dev#desktop --command rustc --version` |
 | Windows, WSL | [NixOS on WSL](#install-nixos-on-wsl) | `wsl -d ankiquest -- nix develop github:AnkiQuest/AnkiQuest-Dev#desktop --command rustc --version` |
 | Windows, native | [winget](#windows) | `rustup run 1.100.0 rustc --version; node --version; uv python list --only-installed; java -version; & "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat" --list_installed` |
 | Any OS with Docker or Podman | [the dev container](#dev-container) | `nix develop .#desktop --command rustc --version` in the container |
@@ -57,7 +56,7 @@ needs `/dev/kvm` (`sudo usermod -aG kvm $USER`).
 
 ## macOS
 
-On Apple silicon, install Nix the same way (`sh <(curl -L
+On Apple silicon and Intel Macs, install Nix the same way (`sh <(curl -L
 https://nixos.org/nix/install)`), add the `experimental-features` line to
 `/etc/nix/nix.conf`, and install direnv and nix-direnv as above (`zsh` users
 hook `direnv hook zsh` into `~/.zshrc`).
@@ -74,6 +73,24 @@ inputs.ankiquest-dev.darwinModules.ankiquest-dev
 It enables flakes, direnv with nix-direnv, git with LFS and gh. Set
 `ankiquest.dev.direnv = "user";` when home-manager already sets up direnv. On
 macOS Gradle uses AGP's own aapt2; the JBR comes from JetBrains as on Linux.
+
+### Intel Macs
+
+nixpkgs 26.11 dropped `x86_64-darwin`, so Intel Macs take every package from
+the `nixpkgs-x86_64-darwin` input, NixOS 26.05, the last release that builds
+it (supported until the end of 2026). The pins in `shells/toolchains.nix` hold
+there: Rust 1.100.0 and 1.97.1, platforms 36 and 37.0, build tools 35.0.0 to
+37.0.0, NDK r28c and r29, Node 22.23.5, Python 3.12 and 3.13. Gaps:
+
+- No pinned JBR. JetBrains' `osx-x64` build has no hash in
+  `shells/toolchains.nix` yet; the shells use nixpkgs' JDK 21 (Zulu) as
+  `JAVA_HOME` and let Gradle download the JBR its daemon asks for.
+  `packages.x86_64-darwin.jbr` is that JDK. To pin it, add an `x86_64-darwin`
+  entry with `arch = "osx-x64"` and the hash `nix build .#jbr` reports.
+- Other tools (gh, uv, esbuild, Gradle) are 26.05's versions, not the
+  unstable ones the other systems get.
+- When 26.05 goes out of support, `x86_64-darwin` and the input are removed;
+  Intel Macs then use the dev container.
 
 ## NixOS
 
