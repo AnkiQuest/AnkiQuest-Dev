@@ -6,20 +6,23 @@ These rules apply to every agent (Claude, Codex, others) and to people too, in e
 
 ## Repositories
 
-All under [github.com/AnkiQuest](https://github.com/AnkiQuest).
+All under [github.com/AnkiQuest](https://github.com/AnkiQuest). Every default branch is `master`.
 
 | Repository | Upstream | Purpose |
 |---|---|---|
 | AnkiQuest-Server | none | The server (Rust), its web pages (TypeScript), the API examples, the shared fixtures and the pose masters. |
 | AnkiQuest-Desktop | none | The Anki desktop add-on (Python). |
 | AnkiQuest-Android | ankidroid/Anki-Android | The Android app (Kotlin): AnkiDroid with AnkiQuest added. |
-| anki | ankitects/anki | Anki's core for the Android app, with our changes on `ankiquest`. |
-| AnkiQuest-Android-Backend | ankidroid/Anki-Android-Backend | The app's Rust backend, built from our anki; published to Maven Central. |
-| garmankiquest | sypianski/garmanki | Garmin watch app and its Android companion. |
-| ankiquest-android-mcp | ankimcp/ankidroid-mcp | MCP server on Android for AnkiDroid and AnkiQuest. |
-| AnkiQuestconnectAndroid | KamWithK/AnkiconnectAndroid | AnkiConnect on Android for AnkiDroid and AnkiQuest. |
+| AnkiQuest-Anki | ankitects/anki | Anki's core for the Android app: upstream plus RWKV and FSRS-7. |
+| AnkiQuest-Android-Backend | ankidroid/Anki-Android-Backend | The app's Rust backend, built from AnkiQuest-Anki; published to Maven Central. |
+| AnkiQuest-GarmAnki | sypianski/garmanki | Garmin watch app and its Android companion. |
+| AnkiQuest-Android-MCP | ankimcp/ankidroid-mcp | MCP server on Android for AnkiDroid and AnkiQuest. |
+| AnkiQuest-AnkiConnectAndroid | KamWithK/AnkiconnectAndroid | AnkiConnect on Android for AnkiDroid and AnkiQuest. |
+| AnkiQuest-Dev | none | The development environment: dev shells, pinned toolchains, shared Nix and the WSL host. |
+| AnkiQuest-Hosting | none | The server hosts' NixOS configuration. |
 | AnkiQuest-Sync | none | Scheduled jobs: fork sync, watched sources, `AGENTS.md` distribution. |
 | AnkiQuest-Agents | none | The source of every `AGENTS.md`. |
+| AnkiQuest-Dev | none | The development environment: dev shells, toolchain pins, NixOS on WSL, NixOS and nix-darwin modules, Windows and dev container setup. |
 | AnkiQuest.github.io | none | The art gallery (coming). |
 
 ## People
@@ -49,7 +52,7 @@ You are the code owner and long-term maintainer of this codebase. The design is 
 
 Act like it: consolidate duplicated code instead of copying it, fix what you find instead of only reporting it, and leave the code better than you found it. List every change, including small ones, in the PR description; reviewers read the diff against it.
 
-Don't hold on to the past. Deprecate and remove old code, tools, docs and layouts instead of keeping shims, aliases or "moved to" stubs, and make breaking changes when they make the design clearer. Pull requests that remove code are especially welcome. Say in the PR what breaks and who has to act. Two limits still apply: released apps keep working, so old endpoints, fields and API examples stay until no supported client uses them; and pose masters and their exported copies are never deleted (see below).
+Don't hold on to the past. Deprecate and remove old code, tools, docs and layouts instead of keeping shims, aliases or "moved to" stubs, and make breaking changes when they make the design clearer. Pull requests that remove code are especially welcome. Say in the PR what breaks and who has to act. Two limits still apply: released apps keep working, so old endpoints, fields and API examples stay until no supported client uses them; and pose masters are never deleted (see below).
 
 ## Bugs: test first
 
@@ -81,33 +84,57 @@ Write new code in Rust, or TypeScript for the web, when the platform allows it. 
 
 - Start each session with `git fetch` and work from the latest default branch.
 - Never push to the default branch; open a pull request.
-- Pull requests by hill or Claude need an approving review from Aldana or Astra (the AldanaBRZ account). Pull requests by Aldana or Astra need an approving review from hill or Claude (the float3 account). One approval from the other side is enough; merge only once it is given and every check is green on the final commit. hill may merge trivially correct changes (documentation, AGENTS.md, README, labels, search and replace) without that review.
+- Pull requests by hill or Claude need an approving review from Aldana or Astra (the AldanaBRZ account). Pull requests by Aldana or Astra need an approving review from hill or Claude (the float3 account). One approval from the other side is enough; merge only once it is given and every check is green on the final commit. hill may merge trivially correct changes (documentation, AGENTS.md, README, labels, search and replace) without that review. The "Update AGENTS.md from AnkiQuest-Agents" pull requests opened by AnkiQuest-Sync need no review: the rules were reviewed here, in AnkiQuest-Agents (hill, 2026-11-20).
 - Commit messages: subject in the imperative, capitalised, at most 50 characters (72 hard limit), no full stop; a blank line; a body wrapped at 72 characters that explains what and why, not how.
-- Name the model that did the work. Every commit, pull request, issue, comment and review an agent writes ends with `Assisted-by: <tool> (<model and version>)`, such as `Assisted-by: Claude Code (Opus 5.5)` or `Assisted-by: Codex (GPT-6)`. In a GitHub post with a generated footer (`---`, then `_Generated by [Claude Code](https://claude.ai/code)_`), the `Assisted-by` line comes directly above the footer, the order the GitHub tools write (hill, 2026-11-20). Don't edit old posts to reorder them. Generated images name the model that drew them in the pull request and in their generation record. If the tool does not say which model it used, write that instead of guessing.
+- Name every model that did the work, the way ankidroid/Anki-Android#23564 does (hill, 2026-11-20). Each commit ends with one `Assisted-by: <model> <reasoning effort>` trailer per model that worked on it, such as `Assisted-by: Claude Opus 5.5` or `Assisted-by: GPT-6.2-Sol xhigh`; leave out the effort when the tool has none. A pull request description starts with a note listing every model that worked on any of its commits:
+
+  ```
+  > [!NOTE]
+  > Assisted-by: Claude Opus 5.5
+  > Assisted-by: GPT-6.2-Sol xhigh
+  ```
+
+  Issues, comments and reviews an agent writes end with the same `Assisted-by` lines. No generated footer (`_Generated by ..._`) and no tool name in the line. Don't edit old posts to match. Generated images name the model that drew them in the pull request and in their generation record. If the tool does not say which model it used, write that instead of guessing.
 - Never link to an agent session (such as `claude.ai/code/session_…`) in commits, pull requests, issues or comments.
 - No emoji in commits, pull requests, issues or comments.
 - Never commit secrets, tokens or personal data. Secrets live on the servers, outside the repositories.
 
+## Reviews
+
+- Review nitpicky and critical, and think every change through, security above all. Raise every nitpick, and request changes as many times as it takes to get it right.
+- When your own work is under review, address every nitpick before merging.
+- Ask hill for advice on implementation details.
+
 ## Forks and wiring
 
 ```
-ankitects/anki                  --mirror-->  AnkiQuest/anki main
-                                             AnkiQuest/anki ankiquest
-                                                 | git submodule
-ankidroid/Anki-Android-Backend  --mirror-->  AnkiQuest/AnkiQuest-Android-Backend main
-                                             AnkiQuest/AnkiQuest-Android-Backend ankiquest
-                                                 | Maven Central: org.ankiquest:anki-backend-android
-ankidroid/Anki-Android          --pr------>  AnkiQuest/AnkiQuest-Android main  --HTTPS-->  AnkiQuest-Server
-                                                 | content provider, through org.ankiquest:api
-sypianski/garmanki              --pr------>  AnkiQuest/garmankiquest master
-ankimcp/ankidroid-mcp           --pr------>  AnkiQuest/ankiquest-android-mcp main
-KamWithK/AnkiconnectAndroid     --pr------>  AnkiQuest/AnkiQuestconnectAndroid master
+ankitects/anki                  --pr-->  AnkiQuest/AnkiQuest-Anki master
+                                             | git submodule
+ankidroid/Anki-Android-Backend  --pr-->  AnkiQuest/AnkiQuest-Android-Backend master
+                                             | Maven Central: org.ankiquest:anki-backend-android
+ankidroid/Anki-Android          --pr-->  AnkiQuest/AnkiQuest-Android master  --HTTPS-->  AnkiQuest-Server
+                                             | content provider, through org.ankiquest:api
+sypianski/garmanki              --pr-->  AnkiQuest/AnkiQuest-GarmAnki master
+ankimcp/ankidroid-mcp           --pr-->  AnkiQuest/AnkiQuest-Android-MCP master
+KamWithK/AnkiconnectAndroid     --pr-->  AnkiQuest/AnkiQuest-AnkiConnectAndroid master
 ```
 
-- **Core forks** (anki, AnkiQuest-Android-Backend): `main` mirrors upstream and only the sync job writes it. Our changes live on `ankiquest`: work from it and open pull requests against it. anki `ankiquest` is the Anki release AnkiDroid uses, plus the RWKV engine and FSRS-7 carried from JSchoreels' and kuma3's forks. AnkiQuest-Android-Backend `ankiquest` is the backend with its `anki` submodule on AnkiQuest/anki `ankiquest`; it publishes `org.ankiquest:anki-backend-android`, `anki-backend-core` and `anki-android-backend-testing` to Maven Central on a `*-ankiquest.*` tag. For each new Anki release AnkiDroid adopts, merge it forward into both `ankiquest` branches, then publish.
-- **App forks** (AnkiQuest-Android, garmankiquest, ankiquest-android-mcp, AnkiQuestconnectAndroid): the default branch carries our changes. Upstream comes in through the sync job's pull request, merged as a merge commit; never squash or rebase it.
-- **Third-party app forks** (garmankiquest, ankiquest-android-mcp, AnkiQuestconnectAndroid): the default branch is our version, with CI, Nix and the AnkiQuest API library `org.ankiquest:api` (coming). The branches `ankidroid-provider-check` and `ankiquest-support` stay ready to propose upstream: upstream's style and languages, no AnkiQuest-only changes. Keep upstream's languages for upstream's code in every fork.
-- **Sync job** (AnkiQuest-Sync, daily and on demand): mirror mode fast-forwards a mirror and opens an issue if it has commits of its own; pr mode opens one pull request from upstream. The `watch` job opens an issue in the fork a watched source feeds when it moves past the reviewed commit or version: JSchoreels/anki, JSchoreels/fsrs-rs, open-spaced-repetition/fsrs-rs, kuma3's core, backend and app, and new upstream backend versions (`watched.json`). The `agents` job opens the `AGENTS.md` pull requests.
+- **Every fork** has one branch of ours, `master`: upstream's default branch plus our changes, consolidated. Upstream comes in through the sync job's pull request, merged as a merge commit; never squash or rebase it. Work from `master` and open pull requests against it.
+- **Core forks** (AnkiQuest-Anki, AnkiQuest-Android-Backend): AnkiQuest-Anki `master` is ankitects/anki `main` plus the RWKV engine and FSRS-7 carried from JSchoreels' and kuma3's forks. AnkiQuest-Android-Backend `master` is upstream plus kuma3's backend wiring, with its `anki` submodule on a commit of AnkiQuest-Anki `master`; it publishes `org.ankiquest:anki-backend-android`, `anki-backend-core` and `anki-android-backend-testing` to Maven Central on a `*-ankiquest.*` tag.
+- **Third-party app forks** (AnkiQuest-GarmAnki, AnkiQuest-Android-MCP, AnkiQuest-AnkiConnectAndroid): `master` is our version, with CI, Nix and the AnkiQuest API library `org.ankiquest:api` (coming). The branches `ankidroid-provider-check` and `ankiquest-support` stay ready to propose upstream: upstream's style and languages, no AnkiQuest-only changes. Keep upstream's languages for upstream's code in every fork.
+- **Sync job** (AnkiQuest-Sync, daily and on demand): opens one pull request per fork from upstream's default branch, and lists the conflicting files. The `watch` job opens an issue in the fork a watched source feeds when it moves past the reviewed commit or version: JSchoreels/anki, JSchoreels/fsrs-rs, open-spaced-repetition/fsrs-rs, kuma3's core, backend and app, and new upstream backend versions (`watched.json`). The `agents` job opens the `AGENTS.md` pull requests.
+- **Shared Nix and CI.** Every repository has a `flake.nix` whose dev shell, pinned toolchain and formatter come from AnkiQuest-Dev, taken as an input; never pin a toolchain in a repository's own flake. Workflows used by more than one repository are reusable workflows in AnkiQuest-Dev (`.github/workflows/`), called with `uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/<name>.yml@master`.
+
+## Licence
+
+Every AnkiQuest repository is under the AGPL wherever its upstream allows it (hill, 2026-11-20).
+
+- Our code and every new repository are AGPL-3.0-or-later: a `LICENSE` with the AGPL text, and the license field set wherever a manifest has one (`Cargo.toml`, `package.json`, `pyproject.toml`). AnkiQuest-Server, AnkiQuest-Desktop and the AnkiQuest code in AnkiQuest-Android are AGPL-3.0-only today; they keep that, in new files too, until hill decides in AnkiQuest/AnkiQuest-Server#95.
+- In forks, upstream code keeps its licence and notices. Our additions are AGPL-3.0-or-later where upstream's licence allows combining them: GPL-3.0 and AGPL-3.0 do (GPLv3 section 13). With a permissive upstream (MIT, BSD, Apache-2.0), our files are AGPL-3.0-or-later and upstream's notices stay.
+- Branches meant for upstream (`ankiquest-support`, `ankidroid-provider-check`, the `upstream/*` pull request branches) use upstream's licence.
+- Exception: the API library that third-party apps link (`api/` in AnkiQuest-Android, published as `org.ankiquest:api`) stays LGPL-3.0-or-later, AnkiDroid's licence for it, so apps under any licence can use it. Our changes to it are LGPL-3.0-or-later too; never move AGPL code into it.
+- Poses keep the licence of their masters: Anki-tan's are CC BY-SA 4.0 (`static/anki-tan/LICENSE` in AnkiQuest-Server, by Shigeyuki), the other companions' fall under AnkiQuest-Server's licence. Don't change the licensing of a pose; that is hill's decision.
+- SPDX headers (`SPDX-License-Identifier: AGPL-3.0-or-later`) go in new files where the repository already uses them, such as AnkiQuest-Android. Don't add or change headers in upstream files in bulk.
 
 ## Desktop and Android parity
 
@@ -123,7 +150,7 @@ AnkiQuest has two clients: the Android app ([AnkiQuest/AnkiQuest-Android](https:
 Every picture of a companion is a pose, including those on moments, share cards, widgets and notifications. The section and tool names keep "art"; the rules speak of poses, masters and exported copies.
 
 - Masters live only in `static/<companion>/` in AnkiQuest-Server. Every exported copy (share cards, add-on, Android, docs) is generated from its master by the exporters and hash-checked in CI; never commit a hand-made copy.
-- Never delete a master or an exported copy, even when nothing uses it any more. Remove the references, keep the files, so they can be reused or merged later.
+- Never delete a master, even when nothing uses it any more: `static/<companion>/` is the only place that keeps old and retired art, so it can be reused or merged later. Exported copies are generated: overwrite them, and delete a copy that was renamed, retired or is no longer used, together with its references. Don't keep unused copies in the clients.
 - Every live companion has every pose listed in [`tests/fixtures/companion_poses.json`](https://github.com/AnkiQuest/AnkiQuest-Server/blob/master/tests/fixtures/companion_poses.json) in AnkiQuest-Server; both clients use that list.
 - A new companion goes live only with every pose drawn.
 - A PR that adds a pose to the list adds its master for every live companion. CI fails a PR that adds a pose without them. A mood that needs a new picture adds a pose this way; otherwise it maps to an existing pose.
@@ -139,10 +166,12 @@ Mannered prose substitutes metaphor and flourish for direct statement. Instead o
 
 ## This repository
 
-AnkiQuest-Dev is the development environment for every AnkiQuest repository: NixOS on WSL (`nixosConfigurations.ankiquest-wsl`) and one dev shell per kind of repository (`devShells.<system>.{default,server,desktop,android,android-emulator,anki}`).
+AnkiQuest-Dev is the development environment for every AnkiQuest repository, on any machine: one dev shell per kind of repository (`devShells.<system>.{default,server,desktop,gallery,android,android-emulator,android-backend,anki}`), NixOS on WSL (`nixosConfigurations.ankiquest-wsl`), modules for NixOS and nix-darwin, a winget configuration for Windows, a dev container, and the reusable workflows and label set every repository shares. The other repositories' flakes take their shells, formatter and pins from here.
 
-- **Layout.** `flake.nix`: the outputs. `shells/toolchains.nix`: every pinned version (Rust, Android SDK and NDK, JBR), each next to the repository file it follows. `shells/default.nix`: the dev shells. `nixos/hosts/ankiquest-wsl`: the WSL host; `nixos/roles` and `nixos/modules`: what it is made of, laid out as in float3/nixos.
-- **Pins follow the repositories.** When a repository changes a version it pins (`rust-toolchain.toml`, `gradle/libs.versions.toml`, `gradle/gradle-daemon-jvm.properties`, a CI workflow), change the matching value in `shells/toolchains.nix`. Update one flake input at a time with `nix flake update <input>`.
-- **Nix only.** Configuration is Nix, formatted with alejandra. Shell stays a few lines of glue; anything larger becomes Rust.
+- **Layout.** `flake.nix`: the outputs (`lib`, `overlays`, `packages`, `devShells`, `nixosModules`, `darwinModules`, `nixosConfigurations`, `checks`). `shells/toolchains.nix`: every pinned version (Rust, Android SDK and NDK, JBR, Node, Python), each next to the repository file it follows. `shells/default.nix`: the dev shells. `nixos/roles` and `nixos/modules`: what a NixOS machine needs, exported as `nixosModules.ankiquest-dev`; `nixos/hosts/ankiquest-wsl`: the WSL host. `darwin/`: `darwinModules.ankiquest-dev`. `windows/`: the winget configuration, generated from `shells/toolchains.nix`. `.devcontainer/`: the dev container.
+- **One source.** Shared Nix tooling (toolchain pins, dev shells, formatter and its check, nix-ld and direnv) lives here only; other repositories take it as the `ankiquest-dev` input. A repository's own packages and NixOS service modules stay in that repository, so nothing here depends on another AnkiQuest repository.
+- **Shared workflows.** Workflows more than one repository runs are reusable workflows in `.github/workflows/` (`android-ci`, `android-nightly`, `labels`, `conflict-scan`, `pr-labels`, `issue-labels`); `labels.json` is the shared label set, tested by `tests/labels.test.ts`. `ankiquest-labels.yml` is the caller the other repositories copy. A change here reaches every caller: check them.
+- **Pins follow the repositories.** When a repository changes a version it pins (`rust-toolchain.toml`, `gradle/libs.versions.toml`, `gradle/gradle-daemon-jvm.properties`, a CI workflow), change the matching value in `shells/toolchains.nix` and regenerate `windows/configuration.dsc.yaml` (`nix build .#windows-configuration`). Update one flake input at a time with `nix flake update <input>`.
+- **Nix only.** Configuration is Nix, formatted with alejandra. Generated files come from Nix expressions or Rust. Shell and PowerShell stay a few lines of glue; anything larger becomes Rust.
 - **Nothing private.** Signing keys, `keystore.properties`, `google-services.json`, tokens and proprietary SDKs (the Garmin Connect IQ SDK) are installed by hand, as the README says, and never committed.
-- **Checks to run** before pushing: `nix flake check`, `alejandra --check .`, and `nix develop .#<shell>` for each shell you changed.
+- **Checks to run** before pushing: `nix flake check --all-systems`, `alejandra --check .`, `nix develop .#<shell>` for each shell you changed, `nix develop -c actionlint`, and `nix develop .#gallery -c node --experimental-strip-types --test tests/*.test.ts` for the label workflows.
