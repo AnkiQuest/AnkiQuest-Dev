@@ -9,6 +9,7 @@
   ...
 }: let
   cfg = config.ankiquest.dev;
+  cache = import ../../cache.nix;
 in {
   options.ankiquest.dev.direnv = lib.mkOption {
     type = lib.types.enum ["system" "user"];
@@ -21,7 +22,12 @@ in {
   };
 
   config = {
-    nix.settings.experimental-features = ["nix-command" "flakes"];
+    nix.settings = {
+      experimental-features = ["nix-command" "flakes"];
+      # The shells' prebuilt closures from AnkiQuest's Cachix cache.
+      extra-substituters = [cache.substituter];
+      extra-trusted-public-keys = [cache.publicKey];
+    };
 
     programs = {
       direnv = lib.mkIf (cfg.direnv == "system") {
@@ -34,58 +40,11 @@ in {
         lfs.enable = true;
       };
 
-      # Gradle's aapt2 and Robolectric's native runtime, foojay JDKs, uv's
-      # CPython builds with the PyQt6 wheels Anki and aqt load, Playwright's
-      # Chromium and rustup toolchains are all linked for a usual Linux.
+      # Binaries linked for a usual Linux; the dev images carry the same
+      # libraries.
       nix-ld = {
         enable = true;
-        libraries = with pkgs; [
-          alsa-lib
-          at-spi2-atk
-          cairo
-          cups
-          dbus
-          expat
-          fontconfig
-          freetype
-          glib
-          icu
-          krb5
-          libdrm
-          libGL
-          libgbm
-          libpulseaudio
-          libuuid
-          libx11
-          libxcb
-          libxcb-cursor
-          libxcb-image
-          libxcb-keysyms
-          libxcb-render-util
-          libxcb-wm
-          libxcomposite
-          libxcursor
-          libxdamage
-          libxext
-          libxfixes
-          libxi
-          libxkbcommon
-          libxkbfile
-          libxrandr
-          libxrender
-          libxshmfence
-          libxtst
-          nspr
-          nss
-          openssl
-          pango
-          portaudio
-          stdenv.cc.cc.lib
-          systemd
-          wayland
-          zlib
-          zstd
-        ];
+        libraries = import ../../shells/nix-ld-libraries.nix pkgs;
       };
     };
 

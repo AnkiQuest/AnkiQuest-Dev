@@ -9,6 +9,7 @@
   ...
 }: let
   cfg = config.ankiquest.dev;
+  cache = import ../cache.nix;
 in {
   options.ankiquest.dev.direnv = lib.mkOption {
     type = lib.types.enum ["system" "user"];
@@ -20,7 +21,12 @@ in {
   };
 
   config = {
-    nix.settings.experimental-features = ["nix-command" "flakes"];
+    nix.settings = {
+      experimental-features = ["nix-command" "flakes"];
+      # AnkiQuest's Cachix cache; it holds Linux builds only so far.
+      extra-substituters = [cache.substituter];
+      extra-trusted-public-keys = [cache.publicKey];
+    };
 
     programs.direnv = lib.mkIf (cfg.direnv == "system") {
       enable = true;

@@ -1,9 +1,9 @@
 {
-  "name": "AnkiQuest-Dev",
+  "name": "AnkiQuest-Dev (Nix)",
   "image": "mcr.microsoft.com/devcontainers/base:3.0.13-noble",
   "features": {
     "ghcr.io/devcontainers/features/nix:1.4.1": {
-      "extraNixConfig": "experimental-features = nix-command flakes"
+      "extraNixConfig": "experimental-features = nix-command flakes\nextra-substituters = https://ankiquest.cachix.org\nextra-trusted-public-keys = ankiquest.cachix.org-1:dX/Nw24o2NazxbWxwc2Fmav2YpCkBSMiQIpaNHhH4gY="
     }
   },
   "postCreateCommand": "nix profile install .#devcontainer && ankiquest-devcontainer-setup",
