@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   # Formatting and evaluation of the WSL system and every dev shell; nothing
-  # large is built. Merge queue groups and pushes to main run on
+  # large is built. Merge queue groups and pushes to master run on
   # AnkiQuest's self-hosted runners, everything else, pull requests
   # included, on GitHub's (float3/nixos, nixos/runner-policy.nix);
   # checks.runner-routing fails any other routing.

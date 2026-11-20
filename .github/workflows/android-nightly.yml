@@ -6,7 +6,7 @@
 #
 #   jobs:
 #     nightly:
-#       uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/android-nightly.yml@main
+#       uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/android-nightly.yml@master
 #       permissions:
 #         contents: write
 #       with:

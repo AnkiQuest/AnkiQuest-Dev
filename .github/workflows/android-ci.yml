@@ -7,7 +7,7 @@
 # Call it from a workflow with the repository's own triggers:
 #   jobs:
 #     ci:
-#       uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/android-ci.yml@main
+#       uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/android-ci.yml@master
 #       with:
 #         working-directory: android
 name: Android CI
