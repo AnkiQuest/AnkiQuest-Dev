@@ -33,15 +33,22 @@ jobs:
       contents: read
       issues: write
 
-  conflicts:
+  # A job named scan: the rulesets require that check name, which a job calling
+  # a reusable workflow would not report. Skipped in merge groups, which counts
+  # as passing.
+  scan:
     if: >-
-      contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event_name)
-      || (github.event_name == 'pull_request_target'
-        && contains(fromJSON('["opened", "reopened", "synchronize"]'), github.event.action))
-    uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/conflict-scan.yml@master
+      github.repository_owner == 'AnkiQuest'
+      && (contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event_name)
+        || (github.event_name == 'pull_request_target'
+          && contains(fromJSON('["opened", "reopened", "synchronize"]'), github.event.action)))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write
+    steps:
+      - uses: AnkiQuest/AnkiQuest-Dev/.github/actions/conflict-scan@master
 
   pull-requests:
     if: github.event_name == 'pull_request_target' || github.event_name == 'pull_request_review'
