@@ -9,14 +9,25 @@
   inherit (pkgs.stdenv.hostPlatform) isLinux;
 
   # Gradle may not download a JDK: the ones foojay offers are linked for a
-  # usual Linux. The local JBR is the toolchain and the daemon JVM.
-  jvmEnv = {
-    JAVA_HOME = "${jbr}";
-    GRADLE_OPTS = lib.concatStringsSep " " [
-      "-Dorg.gradle.java.installations.auto-download=false"
-      "-Dorg.gradle.java.installations.paths=${jbr}"
-    ];
-  };
+  # usual Linux. The local JBR is the toolchain and the daemon JVM. Where
+  # there is no pinned JBR (Intel Macs), Gradle downloads it.
+  jvmEnv =
+    {
+      nix = {
+        JAVA_HOME = "${jbr}";
+        GRADLE_OPTS = lib.concatStringsSep " " [
+          "-Dorg.gradle.java.installations.auto-download=false"
+          "-Dorg.gradle.java.installations.paths=${jbr}"
+        ];
+      };
+      gradle = {
+        JAVA_HOME = "${jbr}";
+        GRADLE_OPTS = "";
+      };
+    }
+    .${
+      toolchains.jvmSource
+    };
 
   # Anki's build downloads node, yarn, protoc and uv unless told where they
   # are. Python stays a uv-managed CPython from .python-version, which runs

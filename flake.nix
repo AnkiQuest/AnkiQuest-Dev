@@ -17,6 +17,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Intel Macs only: nixpkgs 26.11 dropped x86_64-darwin, and 26.05 is the
+    # last release that builds it (supported until the end of 2026).
+    nixpkgs-x86_64-darwin.url = "https://channels.nixos.org/nixos-26.05/nixexprs.tar.xz";
+
     # Only for checks.darwin-module, which evaluates darwinModules on a
     # nix-darwin system. Consumers of the module bring their own.
     nix-darwin = {
@@ -28,6 +32,7 @@
   outputs = inputs @ {
     self,
     nixpkgs,
+    nixpkgs-x86_64-darwin,
     rust-overlay,
     nix-darwin,
     ...
@@ -35,10 +40,13 @@
     lib = nixpkgs.lib;
     username = "hill";
 
-    # Linux (also WSL, arm64 Windows and the dev container on Apple
-    # silicon) and Apple silicon Macs. nixpkgs dropped x86_64-darwin in
-    # 26.11; Intel Macs use the dev container.
-    supportedSystems = ["x86_64-linux" "aarch64-linux" "aarch64-darwin"];
+    # Linux (also WSL, arm64 Windows and the dev container), Apple silicon
+    # and Intel Macs. Intel Macs take their packages from
+    # nixpkgs-x86_64-darwin.
+    supportedSystems = ["x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin"];
+
+    nixpkgsFor = system:
+      {x86_64-darwin = nixpkgs-x86_64-darwin;}.${system} or nixpkgs;
 
     # rust-overlay plus the pinned toolchains as pkgs.ankiquest.
     overlay = lib.composeExtensions rust-overlay.overlays.default (final: _: {
@@ -49,12 +57,14 @@
     });
 
     pkgsFor = system:
-      import nixpkgs {
+      import (nixpkgsFor system) {
         inherit system;
         overlays = [overlay];
         config = {
           allowUnfree = true;
           android_sdk.accept_license = true;
+          # 26.05 warns on every evaluation for x86_64-darwin otherwise.
+          allowDeprecatedx86_64Darwin = true;
         };
       };
 
@@ -101,6 +111,11 @@
     };
 
     overlays.default = overlay;
+
+    # The package sets the shells use, with the overlay: nixpkgs 26.11, or
+    # 26.05 on x86_64-darwin. Other flakes that loop over lib.systems take
+    # pkgs from here, since their own nixpkgs cannot evaluate x86_64-darwin.
+    legacyPackages = forAllSystems (pkgs: pkgs);
 
     formatter = forAllSystems (pkgs: pkgs.alejandra);
 
