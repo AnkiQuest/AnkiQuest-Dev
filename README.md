@@ -147,33 +147,36 @@ wsl --install --no-distribution
 wsl --update
 ```
 
-Then either import the NixOS-WSL release and switch it to this
-configuration, which is the quicker way:
+Then download `ankiquest-wsl.wsl` from the
+[nightly release](https://github.com/AnkiQuest/AnkiQuest-Dev/releases/tag/nightly),
+built from every commit to `main`, check it against `SHA256SUMS`, and import
+it:
 
 ```powershell
-# nixos.wsl from https://github.com/nix-community/NixOS-WSL/releases/latest
-wsl --install --from-file nixos.wsl --name ankiquest
+wsl --install --from-file ankiquest-wsl.wsl --name ankiquest
 wsl -d ankiquest
 ```
+
+The user is `hill`. The image is `ankiquest-wsl-release`: `ankiquest-wsl`
+without kept dev shells, to stay under GitHub's 2 GiB asset limit. Each shell
+is fetched on its first `nix develop`; to keep all of them built, as
+`ankiquest.dev.shells` lists (see below), switch once:
 
 ```sh
 sudo nixos-rebuild switch --flake github:AnkiQuest/AnkiQuest-Dev#ankiquest-wsl
 ```
 
-The default user becomes `hill`; close the shell, run `wsl -t ankiquest`, and
-open it again.
-
-Or build the tarball from this repository on any Linux machine with Nix:
+Or build the image yourself on any Linux machine with Nix:
 
 ```sh
-nix build .#nixosConfigurations.ankiquest-wsl.config.system.build.tarballBuilder
-sudo ./result/bin/nixos-wsl-tarball-builder
-# writes nixos.wsl; install it as above
+nix build .#nixosConfigurations.ankiquest-wsl-release.config.system.build.tarballBuilder
+sudo ./result/bin/nixos-wsl-tarball-builder ankiquest-wsl.wsl
+# install it as above
 ```
 
-The tarball carries every shell in `ankiquest.dev.shells` (see below), so it is
-several GB and needs the Android SDK and JetBrains downloads to work. Set the
-list to `[]` for a small tarball and switch afterwards.
+Use `ankiquest-wsl` instead of `ankiquest-wsl-release` for an image with every
+shell in `ankiquest.dev.shells` built in; it is several GB and needs the
+Android SDK and JetBrains downloads.
 
 ### Memory and swap
 

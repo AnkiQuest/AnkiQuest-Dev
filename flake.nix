@@ -155,7 +155,17 @@
       default = self.darwinModules.ankiquest-dev;
     };
 
-    nixosConfigurations.ankiquest-wsl = mkNixosConfig {hostName = "ankiquest-wsl";};
+    nixosConfigurations = {
+      ankiquest-wsl = mkNixosConfig {hostName = "ankiquest-wsl";};
+
+      # The image the nightly release publishes: ankiquest-wsl without kept
+      # dev shells, so the .wsl file stays under GitHub's 2 GiB asset limit.
+      # Shells build on first `nix develop`, or all at once after
+      # `nixos-rebuild switch` to ankiquest-wsl.
+      ankiquest-wsl-release = self.nixosConfigurations.ankiquest-wsl.extendModules {
+        modules = [{ankiquest.dev.shells = lib.mkForce [];}];
+      };
+    };
 
     checks = forAllSystems (pkgs: {
       formatting = formatCheck pkgs self;
@@ -166,9 +176,10 @@
         touch "$out"
       '';
 
-      # The WSL system and a nix-darwin system with the module, evaluated
-      # without building them.
-      ankiquest-wsl = evalCheck pkgs "ankiquest-wsl" self.nixosConfigurations.ankiquest-wsl.config.system.build.toplevel;
+      # The WSL systems' image builders and a nix-darwin system with the
+      # module, evaluated without building them.
+      ankiquest-wsl = evalCheck pkgs "ankiquest-wsl" self.nixosConfigurations.ankiquest-wsl.config.system.build.tarballBuilder;
+      ankiquest-wsl-release = evalCheck pkgs "ankiquest-wsl-release" self.nixosConfigurations.ankiquest-wsl-release.config.system.build.tarballBuilder;
       darwin-module =
         evalCheck pkgs "darwin-module"
         (nix-darwin.lib.darwinSystem {

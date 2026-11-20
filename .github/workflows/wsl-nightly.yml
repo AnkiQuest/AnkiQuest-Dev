@@ -1,0 +1,148 @@
+name: WSL nightly
+
+# Every push to main builds the NixOS-WSL image and moves the rolling
+# `nightly` pre-release to it, as AnkiQuest-Android's nightly does. Pull
+# requests that change the image and manual runs on other branches build and
+# upload it as an artifact only, so the size limit is checked before merging.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - flake.nix
+      - flake.lock
+      - nixos/**
+      - .github/workflows/wsl-nightly.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push replaces the image, so an older run still building is wasted.
+concurrency:
+  group: wsl-nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ankiquest-wsl.wsl
+  # GitHub refuses release assets of 2 GiB or more.
+  ASSET_LIMIT: 2147483648
+  CONFIG: .#nixosConfigurations.ankiquest-wsl-release.config
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # The system closure and its copy inside the image need more than the
+      # runner's free root disk; drop preinstalled SDKs this job doesn't use.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h / /mnt
+
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # The store path of the system goes into the notes, so a nightly can be
+      # rebuilt and compared from the same commit.
+      - name: Build the tarball builder
+        id: system
+        run: |
+          nix build --out-link builder "$CONFIG.system.build.tarballBuilder"
+          echo "path=$(nix eval --raw "$CONFIG.system.build.toplevel.outPath")" >> "$GITHUB_OUTPUT"
+
+      - name: Write the image
+        run: |
+          mkdir -p /mnt/wsl-tmp
+          sudo env TMPDIR=/mnt/wsl-tmp ./builder/bin/nixos-wsl-tarball-builder "$IMAGE"
+          sudo chown "$(id -u):$(id -g)" "$IMAGE"
+
+      - name: Check the size
+        id: size
+        run: |
+          size=$(stat -c %s "$IMAGE")
+          echo "$IMAGE: $size bytes ($(numfmt --to=iec "$size"))"
+          if [ "$size" -ge "$ASSET_LIMIT" ]; then
+            echo "::error::$IMAGE is $(numfmt --to=iec "$size"), over GitHub's 2 GiB asset limit. Keep large shells out of ankiquest-wsl-release in flake.nix."
+            exit 1
+          fi
+          echo "bytes=$size" >> "$GITHUB_OUTPUT"
+
+      - name: Checksums and notes
+        env:
+          STORE_PATH: ${{ steps.system.outputs.path }}
+          SIZE: ${{ steps.size.outputs.bytes }}
+        run: |
+          sha256sum "$IMAGE" > SHA256SUMS
+          built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          jq -n --arg commit "$GITHUB_SHA" --arg built_at "$built_at" --argjson size "$SIZE" \
+            --arg sha256 "$(cut -d' ' -f1 SHA256SUMS)" --arg system "$STORE_PATH" \
+            '{commit: $commit, built_at: $built_at, size: $size, sha256: $sha256, system: $system}' \
+            > nightly.json
+          cat > notes.md <<EOF
+          Built from $GITHUB_SHA on $built_at. Untested.
+
+          System: \`$STORE_PATH\`
+
+          Install on Windows, in PowerShell:
+
+          \`\`\`powershell
+          wsl --install --no-distribution
+          wsl --update
+          wsl --install --from-file $IMAGE --name ankiquest
+          wsl -d ankiquest
+          \`\`\`
+
+          The user is \`hill\`. The image keeps no dev shells built; each one is
+          fetched on its first \`nix develop\`. To keep them all built, as
+          \`ankiquest.dev.shells\` lists, run once:
+
+          \`\`\`sh
+          sudo nixos-rebuild switch --flake github:AnkiQuest/AnkiQuest-Dev#ankiquest-wsl
+          \`\`\`
+
+          Then follow the README from "Clone the repositories".
+          EOF
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ankiquest-wsl
+          path: |
+            ${{ env.IMAGE }}
+            SHA256SUMS
+            nightly.json
+            notes.md
+          if-no-files-found: error
+          # The image is gzip already.
+          compression-level: 0
+          retention-days: 3
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ankiquest-wsl
+
+      # Recreating the release moves the tag to this commit and drops the
+      # previous nightly's assets.
+      - name: Publish nightly
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete nightly --yes --cleanup-tag || true
+          gh release create nightly "$IMAGE" SHA256SUMS nightly.json \
+            --prerelease --latest=false --target "$GITHUB_SHA" \
+            --title "AnkiQuest-Dev nightly" \
+            --notes-file notes.md
