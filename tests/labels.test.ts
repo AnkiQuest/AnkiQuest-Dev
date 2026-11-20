@@ -137,7 +137,7 @@ test('labels.json holds every label the workflows apply, spelled the same', () =
 });
 
 test('the label workflows are reusable and the caller calls each of them', () => {
-  const called = [...read(CALLER).matchAll(/AnkiQuest-Dev\/\.github\/workflows\/(\S+\.yml)@master/g)].map(match => match[1]);
+  const called = [...read(CALLER).matchAll(/AnkiQuest-Dev\/\.github\/workflows\/(\S+\.yml)@main/g)].map(match => match[1]);
   const reusable = [...labellingWorkflows()].filter(file => file !== CALLER);
   assert.deepEqual([...called].sort(), [...reusable].sort());
   for (const file of reusable) {
