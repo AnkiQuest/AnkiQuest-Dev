@@ -1,0 +1,67 @@
+name: Label Sync
+
+# Keeps the calling repository's labels equal to labels.json in this
+# repository, the label set every AnkiQuest repository shares.
+#
+# It creates or updates every label in the file: colour, description and the
+# exact spelling of the name. A label still under an old name listed in
+# `aliases` is renamed, so pull requests keep it. Labels not in the file are
+# never deleted.
+#
+# Reusable: each repository calls it on a schedule and on workflow_dispatch.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    if: github.repository_owner == 'AnkiQuest'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: AnkiQuest/AnkiQuest-Dev
+          ref: master
+          persist-credentials: false
+          sparse-checkout: labels.json
+          sparse-checkout-cone-mode: false
+
+      - name: Create or update labels
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          labels="repos/$GITHUB_REPOSITORY/labels"
+
+          # The labels API matches names case-insensitively, so the current
+          # name finds a label spelled differently; aliases find renamed ones.
+          jq -c '.[]' labels.json | while read -r label; do
+            name=$(jq -r .name <<<"$label")
+            color=$(jq -r .color <<<"$label")
+            description=$(jq -r .description <<<"$label")
+
+            found=""
+            for path in $(jq -r '[.name] + .aliases | .[] | @uri' <<<"$label"); do
+              if gh api "$labels/$path" --silent 2>/dev/null; then
+                found="$path"
+                break
+              fi
+            done
+
+            if [[ -n "$found" ]]; then
+              echo "Updating $name"
+              gh api -X PATCH "$labels/$found" --silent \
+                -f new_name="$name" -f color="$color" -f description="$description"
+            else
+              echo "Creating $name"
+              gh api -X POST "$labels" --silent \
+                -f name="$name" -f color="$color" -f description="$description"
+            fi
+          done

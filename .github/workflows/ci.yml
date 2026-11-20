@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches:
-      - main
+      - master
   pull_request:
   merge_group:
     types: [checks_requested]
@@ -28,3 +28,23 @@ jobs:
 
       - name: Check the flake
         run: nix flake check --all-systems
+
+  # The label set and the reusable labelling workflows' scripts.
+  labels:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Lint the workflows
+        run: nix develop -c actionlint
+
+      - name: Test the label workflows
+        run: nix develop .#gallery -c node --experimental-strip-types --no-warnings=ExperimentalWarning --test tests/*.test.ts

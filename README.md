@@ -7,16 +7,14 @@ container.
 
 | Shell | Repositories | Main tools |
 |---|---|---|
-| `server` | AnkiQuest-Server, AnkiQuest.github.io | Rust 1.100.0 (wasm32 and Android targets), cargo-ndk, Node 22, esbuild, wasm-ld, SQLite, Python 3.13, uv, JBR 21, Gradle 9 |
+| `server` | AnkiQuest-Server | Rust 1.100.0 (wasm32 and Android targets), cargo-ndk, Node 22, esbuild, wasm-ld, SQLite, Python 3.13, uv, JBR 21, Gradle 9 |
 | `desktop` | AnkiQuest-Desktop | Rust 1.100.0, Python 3.12, pyflakes, uv, Node 22 |
-| `android` | AnkiQuest-Android, ankiquest-android-mcp, AnkiQuestconnectAndroid, garmankiquest (`android/`) | JBR 21, Android SDK (platforms 36, 37.0; build tools 35.0.0, 36.0.0, 37.0.0), Node 22 |
+| `android` | AnkiQuest-Android, AnkiQuest-Android-MCP, AnkiQuest-AnkiConnectAndroid, AnkiQuest-GarmAnki (`android/`) | JBR 21, Android SDK (platforms 36, 37.0; build tools 35.0.0, 36.0.0, 37.0.0), Node 22 |
 | `android-emulator` | the same | `android` plus the emulator and an Android 36 system image |
-| `android-backend` | AnkiQuest-Android-Backend | `android` plus NDK r28c and r29, Rust 1.97.1 (Android targets), cargo-ndk, Anki's build tools |
-| `anki` | AnkiQuest/anki | Rust 1.97.1, Node 22, Yarn 4, protoc, uv, n2, ninja, just, rsync |
-| `default` | this repository | alejandra, nixd, gh |
-
-AnkiQuest-Sync and AnkiQuest-Agents hold only workflows and Markdown and need
-no shell.
+| `android-backend` | AnkiQuest-Android-Backend | `android` plus NDK r28c and r29, Rust 1.99.0 (Android targets), cargo-ndk, Anki's build tools |
+| `anki` | AnkiQuest-Anki | Rust 1.99.0, Node 22, Yarn 4, protoc, uv, n2, ninja, just, rsync |
+| `gallery` | AnkiQuest.github.io | Node 22, cwebp |
+| `default` | this repository, AnkiQuest-Sync, AnkiQuest-Agents | actionlint, alejandra, gh, jq, nixd |
 
 Every version is in `shells/toolchains.nix`, next to the repository file it
 follows. The shells exist for `x86_64-linux`, `aarch64-linux`,
@@ -92,7 +90,7 @@ macOS Gradle uses AGP's own aapt2; the JBR comes from JetBrains as on Linux.
 nixpkgs 26.11 dropped `x86_64-darwin`, so Intel Macs take every package from
 the `nixpkgs-x86_64-darwin` input, NixOS 26.05, the last release that builds
 it (supported until the end of 2026). The pins in `shells/toolchains.nix` hold
-there: Rust 1.100.0 and 1.97.1, platforms 36 and 37.0, build tools 35.0.0 to
+there: Rust 1.100.0 and 1.99.0, platforms 36 and 37.0, build tools 35.0.0 to
 37.0.0, NDK r28c and r29, Node 22.23.5, Python 3.12 and 3.13. Gaps:
 
 - No pinned JBR. JetBrains' `osx-x64` build has no hash in
@@ -236,28 +234,33 @@ machine, give WSL half and keep the swap; if Gradle still runs out, add
 
 ```sh
 mkdir -p ~/src && cd ~/src
-for repo in AnkiQuest-Server AnkiQuest-Desktop AnkiQuest-Android AnkiQuest-Android-Backend anki \
-    ankiquest-android-mcp AnkiQuestconnectAndroid garmankiquest AnkiQuest-Sync AnkiQuest-Agents \
+for repo in AnkiQuest-Server AnkiQuest-Desktop AnkiQuest-Android AnkiQuest-Android-Backend AnkiQuest-Anki \
+    AnkiQuest-Android-MCP AnkiQuest-AnkiConnectAndroid AnkiQuest-GarmAnki AnkiQuest-Sync AnkiQuest-Agents \
     AnkiQuest.github.io AnkiQuest-Dev; do gh repo clone "AnkiQuest/$repo"; done
-git -C anki switch ankiquest
-git -C AnkiQuest-Android-Backend switch ankiquest && git -C AnkiQuest-Android-Backend submodule update --init
+git -C AnkiQuest-Android-Backend submodule update --init
+git -C AnkiQuest.github.io submodule update --init
 ```
 
 Sign in first with `gh auth login`.
 
 ## Enter a shell with direnv
 
-Put one line in an `.envrc` in each checkout and run `direnv allow` there:
+Every repository's `flake.nix` takes its shell from here, so one line in an
+`.envrc` in each checkout does it; run `direnv allow` there:
 
-| Repository | `.envrc` |
+```sh
+echo "use flake" > .envrc
+```
+
+| Repository | Shell its flake takes |
 |---|---|
-| AnkiQuest-Server, AnkiQuest.github.io | `use flake github:AnkiQuest/AnkiQuest-Dev#server` |
-| AnkiQuest-Desktop | `use flake github:AnkiQuest/AnkiQuest-Dev#desktop` |
-| AnkiQuest-Android, ankiquest-android-mcp, AnkiQuestconnectAndroid | `use flake github:AnkiQuest/AnkiQuest-Dev#android` |
-| AnkiQuest-Android-Backend | `use flake github:AnkiQuest/AnkiQuest-Dev#android-backend` |
-| garmankiquest | `use flake github:AnkiQuest/AnkiQuest-Dev#android` |
-| anki | `use flake github:AnkiQuest/AnkiQuest-Dev#anki` |
-| AnkiQuest-Dev | `use flake` (checked in) |
+| AnkiQuest-Server | `server` |
+| AnkiQuest-Desktop | `desktop` |
+| AnkiQuest-Android, AnkiQuest-Android-MCP, AnkiQuest-AnkiConnectAndroid, AnkiQuest-GarmAnki | `android` |
+| AnkiQuest-Android-Backend | `android-backend` |
+| AnkiQuest-Anki | `anki` |
+| AnkiQuest.github.io | `gallery` |
+| AnkiQuest-Dev, AnkiQuest-Sync, AnkiQuest-Agents | `default` |
 
 To try local changes to this repository, use `path:` instead:
 `use flake path:$HOME/src/AnkiQuest-Dev#android`. `.envrc` is not ignored in
@@ -289,10 +292,10 @@ Without direnv: `nix develop github:AnkiQuest/AnkiQuest-Dev#android`.
 
 These never go into this or any other repository:
 
-- **Garmin Connect IQ SDK** (garmankiquest `watch/`). Proprietary and not in
+- **Garmin Connect IQ SDK** (AnkiQuest-GarmAnki `watch/`). Proprietary and not in
   nixpkgs. Download the SDK manager from
   https://developer.garmin.com/connect-iq/sdk/, install SDK 9.x to
-  `~/connectiq-sdk`, and add its `bin` to `PATH` as garmankiquest's
+  `~/connectiq-sdk`, and add its `bin` to `PATH` as AnkiQuest-GarmAnki's
   `CLAUDE.md` says. Its binaries run through nix-ld; the simulator needs WSLg.
   `watch/developer_key` is yours to generate and keep.
 - **Signing keys and service files**: release keystores,
@@ -354,3 +357,18 @@ cannot evaluate `x86_64-darwin`.
 ## Licence
 
 AGPL-3.0-or-later ([LICENSE](LICENSE)).
+
+## Shared workflows
+
+Workflows more than one repository runs are reusable workflows in
+`.github/workflows/`, called with
+`uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/<name>.yml@master`:
+
+| Workflow | Does | Inputs |
+|---|---|---|
+| `android-ci.yml` | Gradle build, lint and unit tests with Temurin 17; `nix flake check` and a debug build in the repository's dev shell | `working-directory`, `jobs` (`gradle nix`, or one of them) |
+| `android-nightly.yml` | A debug APK published as the `nightly` pre-release | `name`, `working-directory`; secret `NIGHTLY_DEBUG_KEYSTORE`; the caller grants `contents: write` |
+| `labels.yml`, `conflict-scan.yml`, `pr-labels.yml`, `issue-labels.yml` | The shared label set (`labels.json`), "Has Conflicts", "Needs Review", "New contributor", area labels from the caller's `.github/labeler.yml`, "Needs Triage" | none; `ankiquest-labels.yml` is the caller every repository copies |
+
+`tests/labels.test.ts` tests the label set and the scripts:
+`nix develop .#gallery -c node --experimental-strip-types --test tests/*.test.ts`.
