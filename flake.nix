@@ -1,5 +1,5 @@
 {
-  description = "AnkiQuest development environment: NixOS on WSL and dev shells";
+  description = "AnkiQuest development environment: dev shells, NixOS on WSL, NixOS and nix-darwin modules";
 
   inputs = {
     # The channel tarball of nixos-unstable, the same nixpkgs float3/nixos
@@ -16,24 +16,42 @@
       url = "git+https://github.com/oxalica/rust-overlay?shallow=1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # Only for checks.darwin-module, which evaluates darwinModules on a
+    # nix-darwin system. Consumers of the module bring their own.
+    nix-darwin = {
+      url = "git+https://github.com/nix-darwin/nix-darwin?shallow=1";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = inputs @ {
     self,
     nixpkgs,
     rust-overlay,
+    nix-darwin,
     ...
   }: let
     lib = nixpkgs.lib;
     username = "hill";
 
-    # WSL runs on x86_64 and on arm64 Windows.
-    supportedSystems = ["x86_64-linux" "aarch64-linux"];
+    # Linux (also WSL, arm64 Windows and the dev container on Apple
+    # silicon) and Apple silicon Macs. nixpkgs dropped x86_64-darwin in
+    # 26.11; Intel Macs use the dev container.
+    supportedSystems = ["x86_64-linux" "aarch64-linux" "aarch64-darwin"];
+
+    # rust-overlay plus the pinned toolchains as pkgs.ankiquest.
+    overlay = lib.composeExtensions rust-overlay.overlays.default (final: _: {
+      ankiquest = import ./shells/toolchains.nix {
+        pkgs = final;
+        inherit (final) lib;
+      };
+    });
 
     pkgsFor = system:
       import nixpkgs {
         inherit system;
-        overlays = [rust-overlay.overlays.default];
+        overlays = [overlay];
         config = {
           allowUnfree = true;
           android_sdk.accept_license = true;
@@ -43,13 +61,25 @@
     forAllSystems = f:
       lib.genAttrs supportedSystems (system: f (pkgsFor system));
 
-    toolchainsFor = pkgs: import ./shells/toolchains.nix {inherit pkgs lib;};
-
     shellsFor = pkgs:
       import ./shells {
         inherit pkgs lib;
-        toolchains = toolchainsFor pkgs;
+        toolchains = pkgs.ankiquest;
       };
+
+    # alejandra over a source tree, for other flakes' checks.
+    formatCheck = pkgs: src:
+      pkgs.runCommand "alejandra-check" {
+        nativeBuildInputs = [pkgs.alejandra];
+        inherit src;
+      } ''
+        alejandra --check "$src"
+        touch "$out"
+      '';
+
+    # The store path of a derivation as a check, without building it.
+    evalCheck = pkgs: name: drv:
+      pkgs.writeText "${name}-eval" (builtins.unsafeDiscardStringContext drv.drvPath);
 
     mkNixosConfig = {
       hostName,
@@ -57,32 +87,58 @@
     }:
       lib.nixosSystem {
         inherit system;
-        specialArgs =
-          inputs
-          // {
-            inherit username;
-            devShells = self.devShells.${system};
-          };
-        modules = [
-          ./nixos/hosts/${hostName}/configuration.nix
-          {nixpkgs.overlays = [rust-overlay.overlays.default];}
-        ];
+        specialArgs = inputs // {inherit username;};
+        modules = [./nixos/hosts/${hostName}/configuration.nix];
       };
   in {
+    # For other flakes: the systems the shells exist for, the pins as plain
+    # values, the formatter check, and the toolchains as an overlay
+    # (pkgs.ankiquest).
+    lib = {
+      inherit formatCheck;
+      systems = supportedSystems;
+      versions = (pkgsFor "x86_64-linux").ankiquest.versions;
+    };
+
+    overlays.default = overlay;
+
     formatter = forAllSystems (pkgs: pkgs.alejandra);
 
     devShells = forAllSystems shellsFor;
 
     # The pinned toolchains on their own, for other flakes and for
-    # `nix build .#android-sdk`.
+    # `nix build .#android-sdk`; the generated Windows configuration; the
+    # dev container's profile.
     packages = forAllSystems (pkgs: let
-      toolchains = toolchainsFor pkgs;
+      toolchains = pkgs.ankiquest;
     in {
       inherit (toolchains) jbr;
       rust = toolchains.rust.current;
       rust-anki = toolchains.rust.anki;
-      android-sdk = toolchains.androidSdk.excluded;
+      android-sdk = toolchains.androidSdk.app;
+      android-sdk-ndk = toolchains.androidSdk.backend;
+      windows-configuration = import ./windows {
+        inherit pkgs lib toolchains;
+      };
+      devcontainer = import ./.devcontainer {inherit pkgs;};
     });
+
+    # What a machine needs for the AnkiQuest checkouts: flakes, direnv, git,
+    # gh and, on NixOS, nix-ld and kept dev shells (ankiquest.dev.shells).
+    nixosModules = {
+      ankiquest-dev = {
+        imports = [
+          ./nixos/roles/dev.nix
+          (import ./nixos/modules/dev-shells.nix self.devShells)
+        ];
+      };
+      default = self.nixosModules.ankiquest-dev;
+    };
+
+    darwinModules = {
+      ankiquest-dev = ./darwin/module.nix;
+      default = self.darwinModules.ankiquest-dev;
+    };
 
     nixosConfigurations = {
       ankiquest-wsl = mkNixosConfig {hostName = "ankiquest-wsl";};
@@ -96,24 +152,28 @@
       };
     };
 
-    checks = forAllSystems (pkgs:
-      {
-        formatting =
-          pkgs.runCommand "alejandra-check" {
-            nativeBuildInputs = [pkgs.alejandra];
-            src = self;
-          } ''
-            alejandra --check "$src"
-            touch "$out"
-          '';
-      }
-      # Evaluates each WSL system and its image builder without building
-      # them: the store path of the builder's derivation, with the dependency
-      # on it dropped.
-      // lib.mapAttrs (name: system: let
-        drvPath = system.config.system.build.tarballBuilder.drvPath;
-      in
-        pkgs.writeText "${name}-eval" (builtins.unsafeDiscardStringContext drvPath))
-      self.nixosConfigurations);
+    checks = forAllSystems (pkgs: {
+      formatting = formatCheck pkgs self;
+
+      # The checked-in Windows configuration is the generated one.
+      windows-configuration = pkgs.runCommand "windows-configuration-check" {} ''
+        diff -u ${./windows/configuration.dsc.yaml} ${self.packages.${pkgs.stdenv.hostPlatform.system}.windows-configuration}
+        touch "$out"
+      '';
+
+      # The WSL systems' image builders and a nix-darwin system with the
+      # module, evaluated without building them.
+      ankiquest-wsl = evalCheck pkgs "ankiquest-wsl" self.nixosConfigurations.ankiquest-wsl.config.system.build.tarballBuilder;
+      ankiquest-wsl-release = evalCheck pkgs "ankiquest-wsl-release" self.nixosConfigurations.ankiquest-wsl-release.config.system.build.tarballBuilder;
+      darwin-module =
+        evalCheck pkgs "darwin-module"
+        (nix-darwin.lib.darwinSystem {
+          system = "aarch64-darwin";
+          modules = [
+            self.darwinModules.ankiquest-dev
+            {system.stateVersion = 6;}
+          ];
+        }).system;
+    });
   };
 }
