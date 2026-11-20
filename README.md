@@ -167,3 +167,7 @@ system generation or direnv checkout uses.
   `nix flake update nixpkgs`.
 
 Then `nix flake check`, `nix fmt`, and enter each shell you touched.
+
+## Licence
+
+AGPL-3.0-or-later ([LICENSE](LICENSE)).
