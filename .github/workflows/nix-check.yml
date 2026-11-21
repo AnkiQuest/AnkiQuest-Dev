@@ -1,0 +1,161 @@
+# Reusable Nix checks for every AnkiQuest repository: `nix flake check`,
+# the formatter's check, actionlint and the caller's own commands in its
+# dev shell, with one pinned install-nix-action.
+#
+# Call it from a workflow with the repository's own triggers:
+#   jobs:
+#     check:
+#       uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/nix-check.yml@master
+#       with:
+#         actionlint: true
+#         run: jq empty watched.json
+#
+# The job reports as `<caller job> / check`; a ruleset that requires the
+# caller's old job name needs the new name.
+name: Nix check
+
+on:
+  workflow_call:
+    inputs:
+      flake:
+        description: >-
+          The flake whose formatter and dev shell are used. A repository
+          without a flake passes github:AnkiQuest/AnkiQuest-Dev.
+        type: string
+        default: .
+      flake-check:
+        description: Run `nix flake check` on the repository's flake.
+        type: boolean
+        default: true
+      all-systems:
+        description: Pass --all-systems to `nix flake check`.
+        type: boolean
+        default: false
+      format:
+        description: >-
+          The paths the formatter checks, space-separated; empty skips the
+          check (for flakes whose checks already include it).
+        type: string
+        default: .
+      actionlint:
+        description: Lint .github/workflows with the dev shell's actionlint.
+        type: boolean
+        default: false
+      run:
+        description: Bash commands run in the dev shell after the checks.
+        type: string
+        default: ""
+      rust-cache:
+        description: Cache Cargo's registry and target directory.
+        type: boolean
+        default: false
+      image:
+        description: >-
+          On GitHub's runners, run every Nix command in this Docker image
+          (nixos/nix) instead of on the Ubuntu host. Like NixOS, that image
+          has no /lib64 loader or /usr/lib. The self-hosted runners are
+          NixOS and run the commands directly.
+        type: string
+        default: ""
+      free-disk-space:
+        description: On GitHub's runners, remove preinstalled SDKs first.
+        type: boolean
+        default: false
+      timeout-minutes:
+        description: The job's timeout.
+        type: number
+        default: 30
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # Merge queue groups and pushes to the caller's master run on AnkiQuest's
+  # self-hosted runners, everything else, pull requests included, on
+  # GitHub's (float3/nixos, nixos/runner-policy.nix); checks.runner-routing
+  # fails any other routing. github.event_name is the caller's event.
+  check:
+    runs-on: ${{ (github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) && fromJSON('["self-hosted","Linux","X64","ankiquest","build"]') || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - name: Free disk space
+        if: inputs.free-disk-space && runner.environment == 'github-hosted'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The self-hosted runners bring their own single-user Nix, and the
+      # image its own.
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+        if: runner.environment == 'github-hosted' && inputs.image == ''
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: inputs.rust-cache
+
+      # $IN_NIX runs one command where Nix is: on the host, or in the image
+      # with the checkout at /src. A named volume keeps the image's /nix,
+      # and so the store, from one step to the next.
+      - name: Choose where Nix runs
+        env:
+          IMAGE: ${{ runner.environment == 'github-hosted' && inputs.image || '' }}
+        run: |
+          wrapper="$RUNNER_TEMP/in-nix"
+          if [ -z "$IMAGE" ]; then
+            cat > "$wrapper" <<'EOF'
+          #!/usr/bin/env bash
+          exec bash -euo pipefail -c "$1"
+          EOF
+          else
+            cat > "$wrapper" <<EOF
+          #!/usr/bin/env bash
+          exec docker run --rm -v "\$PWD:/src" -w /src -v nix-check-store:/nix -e CI=true \\
+            -e NIX_CONFIG="experimental-features = nix-command flakes" \\
+            "$IMAGE" sh -euc "git config --global --add safe.directory /src; \$1"
+          EOF
+          fi
+          chmod +x "$wrapper"
+          echo "IN_NIX=$wrapper" >> "$GITHUB_ENV"
+
+      - name: Check the flake
+        if: inputs.flake-check
+        env:
+          ALL_SYSTEMS: ${{ inputs.all-systems && '--all-systems' || '' }}
+        run: |
+          "$IN_NIX" "nix flake check $ALL_SYSTEMS"
+
+      - name: Check the formatting
+        if: inputs.format != ''
+        env:
+          FLAKE: ${{ inputs.flake }}
+          FORMAT: ${{ inputs.format }}
+        run: |
+          "$IN_NIX" "nix run '$FLAKE#formatter.'\"\$(nix eval --raw --impure --expr builtins.currentSystem)\" -- --check $FORMAT"
+
+      - name: Lint the workflows
+        if: inputs.actionlint
+        env:
+          FLAKE: ${{ inputs.flake }}
+        run: |
+          "$IN_NIX" "nix develop '$FLAKE' -c actionlint"
+
+      - name: Run the caller's commands
+        if: inputs.run != ''
+        env:
+          FLAKE: ${{ inputs.flake }}
+          RUN: ${{ inputs.run }}
+        run: |
+          # A file in the checkout, which the image sees too.
+          printf '%s\n' "$RUN" > .nix-check-run.sh
+          trap 'rm -f .nix-check-run.sh' EXIT
+          "$IN_NIX" "nix develop '$FLAKE' -c bash -euo pipefail .nix-check-run.sh"
