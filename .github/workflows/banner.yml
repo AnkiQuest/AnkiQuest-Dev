@@ -1,0 +1,144 @@
+# Reusable check of a repository's README banner and social preview, the
+# same in every repository that has them (AnkiQuest-Server,
+# AnkiQuest-Desktop, AnkiQuest-Android). It draws both with
+# tools/banner (ankiquest-banner) from the repository's
+# docs/graphics/banner.toml and fails unless the committed images have
+# the drawn pixels and the social preview fits GitHub's limit. The
+# drawings are uploaded as the `banner` artifact, to be committed when
+# they differ.
+#
+# The companion pose comes from its master in AnkiQuest-Server: at the
+# commit in `server-sha-file`, or from the calling repository itself when
+# that input is empty (AnkiQuest-Server). Screens that are not committed
+# (Android records them with Gradle) come from an artifact of an earlier
+# job in the caller.
+#
+#   jobs:
+#     banner:
+#       uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/banner.yml@master
+#       with:
+#         server-sha-file: tests/ankiquest-server.sha
+name: Banner
+
+on:
+  workflow_call:
+    inputs:
+      server-sha-file:
+        description: File with the pinned AnkiQuest-Server commit; empty when the caller is AnkiQuest-Server.
+        type: string
+        default: ""
+      screens-artifact:
+        description: Artifact with the recorded screens, if they are not committed.
+        type: string
+        default: ""
+      screens-path:
+        description: Where the screens artifact goes, as banner.toml names it.
+        type: string
+        default: ""
+      on-stale:
+        description: '"fail" fails the job when an image is stale; "report" only sets the stale output.'
+        type: string
+        default: fail
+      tool-ref:
+        description: The AnkiQuest-Dev commit to take the tool from.
+        type: string
+        default: master
+    outputs:
+      stale:
+        description: '"true" when a committed image differs from the drawing.'
+        value: ${{ jobs.banner.outputs.stale }}
+
+permissions:
+  contents: read
+
+jobs:
+  banner:
+    name: README banner and social preview
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      stale: ${{ steps.check.outputs.stale }}
+    steps:
+      - name: Refuse an unknown on-stale
+        if: inputs.on-stale != 'fail' && inputs.on-stale != 'report'
+        env:
+          ON_STALE: ${{ inputs.on-stale }}
+        run: |
+          echo "::error::on-stale is \"$ON_STALE\"; use fail or report."
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The pose masters, at the caller's pinned AnkiQuest-Server commit.
+      - name: Read the pinned server commit
+        id: server
+        env:
+          SHA_FILE: ${{ inputs.server-sha-file }}
+        run: |
+          if [ -z "$SHA_FILE" ]; then
+            echo "path=." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "sha=$(tr -d '[:space:]' < "$SHA_FILE")" >> "$GITHUB_OUTPUT"
+          echo "path=.banner/server" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: inputs.server-sha-file != ''
+        with:
+          repository: AnkiQuest/AnkiQuest-Server
+          ref: ${{ steps.server.outputs.sha }}
+          path: .banner/server
+          sparse-checkout: static
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: AnkiQuest/AnkiQuest-Dev
+          ref: ${{ inputs.tool-ref }}
+          path: .banner/dev
+          sparse-checkout: tools/banner
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: inputs.screens-artifact != ''
+        with:
+          name: ${{ inputs.screens-artifact }}
+          path: ${{ inputs.screens-path }}
+
+      # The runner image ships rustup; the lockfile fixes every crate.
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: .banner/dev/tools/banner
+
+      - name: Draw and compare
+        id: check
+        env:
+          SERVER: ${{ steps.server.outputs.path }}
+          ON_STALE: ${{ inputs.on-stale }}
+        # Exit 1 means a stale image, 2 an input that could not be read.
+        run: |
+          status=0
+          cargo run --locked --release --manifest-path .banner/dev/tools/banner/Cargo.toml -- \
+            --server "$SERVER" --check --out "$RUNNER_TEMP/banner" || status=$?
+          if [ "$status" = 0 ]; then
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$status" != 1 ]; then
+            exit "$status"
+          fi
+          echo "stale=true" >> "$GITHUB_OUTPUT"
+          if [ "$ON_STALE" = fail ]; then
+            echo "::error::The banner or social preview is stale. Commit the images in this run's banner artifact, or redraw them with ankiquest-banner."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: banner
+          path: ${{ runner.temp }}/banner/
+          if-no-files-found: ignore

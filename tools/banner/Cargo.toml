@@ -1,0 +1,21 @@
+[package]
+name = "ankiquest-banner"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "AGPL-3.0-or-later"
+description = "Draws and checks every AnkiQuest repository's README banner and social preview"
+publish = false
+
+[[bin]]
+name = "ankiquest-banner"
+path = "src/main.rs"
+
+# A workspace of its own: this repository has no other Rust code.
+[workspace]
+
+[dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+resvg = { version = "0.50", default-features = false, features = ["text"] }
+serde = { version = "1", features = ["derive"] }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }

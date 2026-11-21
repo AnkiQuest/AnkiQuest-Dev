@@ -368,9 +368,36 @@ Workflows more than one repository runs are reusable workflows in
 |---|---|---|
 | `android-ci.yml` | Gradle build, lint and unit tests with Temurin 17; `nix flake check` and a debug build in the repository's dev shell | `working-directory`, `jobs` (`gradle nix`, or one of them) |
 | `android-nightly.yml` | A debug APK published as the `nightly` pre-release | `name`, `working-directory`; secret `NIGHTLY_DEBUG_KEYSTORE`; the caller grants `contents: write` |
+| `banner.yml` | Draws the README banner and social preview with `ankiquest-banner` and fails unless the committed images have the same pixels; uploads the drawings as the `banner` artifact | `server-sha-file` (the pinned AnkiQuest-Server commit; empty in AnkiQuest-Server), `screens-artifact` and `screens-path` (screens not committed), `on-stale` (`fail` or `report`; output `stale`) |
 | `labels.yml`, `pr-labels.yml`, `issue-labels.yml` | The shared label set (`labels.json`), "Needs Review", "New contributor", area labels from the caller's `.github/labeler.yml`, "Needs Triage" | none; `ankiquest-labels.yml` is the caller every repository copies |
 
 The conflict scan ("Has Conflicts") is an action, `.github/actions/conflict-scan`, run by the caller's own job named `scan`: the rulesets require a check with that exact name, and a job that calls a reusable workflow reports as `<job> / scan`.
 
 `tests/labels.test.ts` tests the label set and the scripts:
 `nix develop .#gallery -c node --experimental-strip-types --test tests/*.test.ts`.
+
+## README banner and social preview
+
+Every repository with a README banner draws it, and its social preview,
+with one tool: `ankiquest-banner` (`tools/banner`, also
+`nix run github:AnkiQuest/AnkiQuest-Dev#banner`). The repository keeps
+only its inputs in `docs/graphics/banner.toml`: title and tagline, the
+companion pose (a master in AnkiQuest-Server's `static/`), its screens
+with their frames (`window`, `browser` or `phone`) and the command that
+records them. Both images are 1280x741 and 1280x640 pixels, in the same
+gradient, light, Roboto and layout everywhere.
+
+```sh
+# From the repository root: redraw both images.
+cargo run --release --manifest-path ../AnkiQuest-Dev/tools/banner/Cargo.toml -- --server ../AnkiQuest-Server
+# Record the screens first, with the configuration's record command.
+... -- --server ../AnkiQuest-Server --record
+# Compare with the committed images, as CI does; write the drawings to a folder.
+... -- --server ../AnkiQuest-Server --check --out /tmp/banner
+```
+
+`--check` exits 1 when a committed image differs from the drawing in any
+pixel, or the social preview is 1,000,000 bytes or more (GitHub's limit),
+and 2 when an input cannot be read. `banner.yml` runs it in CI. A change
+to the tool that changes pixels changes every caller's images: redraw them
+in each repository.
