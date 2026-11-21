@@ -374,6 +374,8 @@ Workflows more than one repository runs are reusable workflows in
 
 The conflict scan ("Has Conflicts") is an action, `.github/actions/conflict-scan`, run by the caller's own job named `scan`: the rulesets require a check with that exact name, and a job that calls a reusable workflow reports as `<job> / scan`. Likewise a job calling `nix-check.yml` reports as `<job> / check`.
 
+"Needs Review" marks a pull request that waits on a reviewer: open, not a draft, not approved by another member, and with no member's change request on its current head. The rule is `.github/scripts/needs-review.cjs`; `pr-labels.yml` checks it out from master and applies it on pull request and review events, and to every open pull request on the caller's schedule and `workflow_dispatch`. Dispatching a repository's Labels workflow corrects every "Needs Review" label at once.
+
 `tests/labels.test.ts` tests the label set and the scripts:
 `nix develop .#gallery -c node --experimental-strip-types --test tests/*.test.ts`.
 

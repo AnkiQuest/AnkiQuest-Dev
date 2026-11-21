@@ -1,5 +1,5 @@
 [
-  {"name": "Needs Review", "color": "fbca04", "description": "Open, non-draft pull request awaiting review (set by CI)", "aliases": []},
+  {"name": "Needs Review", "color": "fbca04", "description": "Pull request waiting on a reviewer (set by CI)", "aliases": []},
   {"name": "Has Conflicts", "color": "b60205", "description": "Has merge conflicts with the base branch (set by CI)", "aliases": ["conflicts"]},
   {"name": "New contributor", "color": "c5def5", "description": "First pull request from this author (set by CI)", "aliases": []},
   {"name": "Needs Triage", "color": "ededed", "description": "New issue without a label yet (set by CI)", "aliases": []},
