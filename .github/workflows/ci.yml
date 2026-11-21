@@ -41,3 +41,29 @@ jobs:
 
       - name: Test the label workflows
         run: nix develop .#gallery -c node --experimental-strip-types --no-warnings=ExperimentalWarning --test tests/*.test.ts
+
+  # The banner tool (tools/banner), a Cargo workspace of its own. The
+  # flake's checks.banner runs its tests too.
+  banner:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: tools/banner
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update && rustup default stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: tools/banner
+
+      - name: Format, lint and test
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked

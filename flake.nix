@@ -144,6 +144,10 @@
           inherit pkgs lib toolchains;
         };
         devcontainer = import ./.devcontainer {inherit pkgs;};
+
+        # Every repository's README banner and social preview
+        # (tools/banner).
+        banner = pkgs.callPackage ./tools/banner/package.nix {};
       }
       # The dev images, as image-<shell>: a script that streams the image to
       # stdout (`$(nix build --print-out-paths .#image-android) | docker load`).
@@ -184,6 +188,9 @@
 
     checks = forAllSystems (pkgs: {
       formatting = formatCheck pkgs self;
+
+      # The banner tool builds and its tests pass.
+      inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) banner;
 
       # No job can send pull_request code to the self-hosted runners.
       runner-routing = pkgs.callPackage ./checks/runners.nix {} ./.github/workflows;
