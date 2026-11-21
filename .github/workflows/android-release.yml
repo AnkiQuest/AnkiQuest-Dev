@@ -5,6 +5,7 @@
 #   <name>-<version>-<abi>.apk        for arm64-v8a, armeabi-v7a, x86_64, x86
 #   <name>-<version>-universal.apk
 #   SHA256SUMS.txt
+# With an empty version they are <name>-<abi>.apk and <name>-universal.apk.
 # Self-updating apps pick the asset ending in -<abi>.apk for the first entry
 # of Build.SUPPORTED_ABIS that has one, else the one ending in -universal.apk.
 #
@@ -32,7 +33,7 @@ on:
         type: string
         required: true
       version:
-        description: The version in asset names; "nightly" keeps nightly URLs fixed.
+        description: The version in asset names; "nightly" keeps nightly URLs fixed, empty leaves it out.
         type: string
         default: nightly
       release:
@@ -231,7 +232,7 @@ jobs:
               ls -l "$APK_DIR"
               exit 1
             fi
-            cp "${matches[0]}" "dist/$NAME-$VERSION-$variant.apk"
+            cp "${matches[0]}" "dist/$NAME${VERSION:+-$VERSION}-$variant.apk"
           done
 
       # apksigner and aapt2 from the newest build-tools on the runner.
@@ -290,7 +291,7 @@ jobs:
           VERSION: ${{ inputs.version }}
           EXPECTED: ${{ inputs.expected-version-code }}
         run: |
-          code=$("$BUILD_TOOLS/aapt2" dump badging "dist/$NAME-$VERSION-universal.apk" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
+          code=$("$BUILD_TOOLS/aapt2" dump badging "dist/$NAME${VERSION:+-$VERSION}-universal.apk" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
           echo "universal versionCode $code"
           if [ -n "$EXPECTED" ] && [ "$code" != "$EXPECTED" ]; then
             echo "::error::versionCode $code, expected $EXPECTED"
@@ -313,14 +314,15 @@ jobs:
           FIELDS: ${{ inputs.manifest-fields }}
         run: |
           cd dist
-          universal="$NAME-$VERSION-universal.apk"
+          prefix="$NAME${VERSION:+-$VERSION}"
+          universal="$prefix-universal.apk"
           for alias in $ALIASES; do
             cp "$universal" "$alias"
           done
 
           if [ -n "$MANIFEST" ]; then
               for variant in arm64-v8a armeabi-v7a x86_64 x86 universal; do
-              file="$NAME-$VERSION-$variant.apk"
+              file="$prefix-$variant.apk"
               code=$("$BUILD_TOOLS/aapt2" dump badging "$file" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
               jq -n --arg abi "$variant" --arg name "$file" --argjson size "$(stat -c %s "$file")" --argjson code "$code" \
                 '{abi: $abi, name: $name, size: $size, version_code: $code}'
