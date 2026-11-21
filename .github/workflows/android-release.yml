@@ -1,0 +1,371 @@
+# Reusable APK release for every AnkiQuest Android app: builds one APK per
+# ABI and a universal one with Gradle ABI splits, signs them, and publishes
+# them as the "nightly" pre-release (replacing the previous one) or as the
+# release of the pushed tag. Asset names are fixed:
+#   <name>-<version>-<abi>.apk        for arm64-v8a, armeabi-v7a, x86_64, x86
+#   <name>-<version>-universal.apk
+#   SHA256SUMS.txt
+# With an empty version they are <name>-<abi>.apk and <name>-universal.apk.
+# Self-updating apps pick the asset ending in -<abi>.apk for the first entry
+# of Build.SUPPORTED_ABIS that has one, else the one ending in -universal.apk.
+#
+# The caller's Gradle task must write one APK per ABI and a universal one
+# into apk-dir, each file name containing -<abi>- or -universal-.
+#
+#   jobs:
+#     nightly:
+#       uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/android-release.yml@master
+#       permissions:
+#         contents: write
+#       with:
+#         name: AnkiQuest-GarmAnki
+#         working-directory: android
+#         gradle-args: -PabiSplits=true
+#       secrets:
+#         DEBUG_KEYSTORE: ${{ secrets.NIGHTLY_DEBUG_KEYSTORE }}
+name: Android release
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: The asset base name.
+        type: string
+        required: true
+      version:
+        description: The version in asset names; "nightly" keeps nightly URLs fixed, empty leaves it out.
+        type: string
+        default: nightly
+      release:
+        description: >-
+          nightly: replace the "nightly" pre-release. tag: create the release of
+          the pushed tag. none: only upload the APKs as the "apks" artifact.
+        type: string
+        default: nightly
+      working-directory:
+        description: The Gradle project's directory.
+        type: string
+        default: .
+      gradle-task:
+        description: The Gradle task that builds the APKs.
+        type: string
+        default: :app:assembleDebug
+      gradle-args:
+        description: Further Gradle arguments, such as the property that enables ABI splits.
+        type: string
+        default: ""
+      apk-dir:
+        description: Where the Gradle task writes the APKs, relative to working-directory.
+        type: string
+        default: app/build/outputs/apk/debug
+      local-properties:
+        description: Lines appended to local.properties before the build.
+        type: string
+        default: ""
+      java-distribution:
+        type: string
+        default: temurin
+      java-version:
+        type: string
+        default: "17"
+      signing:
+        description: >-
+          debug: Gradle signs; the DEBUG_KEYSTORE secret, if set, becomes the
+          debug key. apksigner: every APK is signed again with SIGNING_KEYSTORE;
+          without it a tag fails and a nightly is not published.
+        type: string
+        default: debug
+      key-alias:
+        description: apksigner only. The alias in SIGNING_KEYSTORE.
+        type: string
+        default: ""
+      rotate-from-keystore:
+        description: apksigner only. A keystore in the repository with the key rotated from; empty for no rotation.
+        type: string
+        default: ""
+      rotate-from-alias:
+        type: string
+        default: ""
+      rotate-from-password:
+        description: The password of rotate-from-keystore; only for a key whose password is public.
+        type: string
+        default: ""
+      rotate-lineage:
+        description: The signing lineage file in the repository.
+        type: string
+        default: ""
+      rotate-min-sdk:
+        type: string
+        default: "28"
+      cert-subject:
+        description: apksigner only. Text the printed certificates must contain, such as CN=AnkiQuest.
+        type: string
+        default: ""
+      expected-version-code:
+        description: The universal APK's versionCode; the job fails on any other. Empty skips the check.
+        type: string
+        default: ""
+      aliases:
+        description: Space-separated extra asset names that get a copy of the universal APK, for old clients.
+        type: string
+        default: ""
+      manifest:
+        description: >-
+          A JSON file name to publish with commit, built_at, version_code and
+          size of the universal APK, and apks (abi, name, size, version_code).
+          Empty publishes none.
+        type: string
+        default: ""
+      manifest-fields:
+        description: A JSON object merged into the manifest.
+        type: string
+        default: "{}"
+      title:
+        description: The release title; empty for "Nightly (<commit>)" or the tag.
+        type: string
+        default: ""
+      notes:
+        description: The release notes; empty for a generated line.
+        type: string
+        default: ""
+      notes-file:
+        description: A file in the repository with the release notes; wins over notes.
+        type: string
+        default: ""
+      timeout-minutes:
+        type: number
+        default: 30
+    secrets:
+      DEBUG_KEYSTORE:
+        description: signing debug. A base64 debug keystore, so each nightly installs over the last.
+        required: false
+      SIGNING_KEYSTORE:
+        description: signing apksigner. The base64 release keystore.
+        required: false
+      SIGNING_KEY_PASSWORD:
+        description: signing apksigner. The password of SIGNING_KEYSTORE and its key.
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  # Gradle retries HTTP 429 and 5xx, by default 3 tries 1s and 2s apart. Maven Central's rate
+  # limit lasts longer than that, so try 7 times with doubling waits from 2s (about 2 minutes).
+  GRADLE_OPTS: -Dorg.gradle.internal.repository.max.tentatives=7 -Dorg.gradle.internal.repository.initial.backoff=2000
+
+jobs:
+  apks:
+    name: APKs
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: write
+    steps:
+      - name: Check inputs
+        env:
+          RELEASE: ${{ inputs.release }}
+          SIGNING: ${{ inputs.signing }}
+        run: |
+          case "$RELEASE" in nightly|tag|none) ;; *) echo "::error::release must be nightly, tag or none"; exit 1 ;; esac
+          case "$SIGNING" in debug|apksigner) ;; *) echo "::error::signing must be debug or apksigner"; exit 1 ;; esac
+          if [ "$RELEASE" = tag ] && [ "$GITHUB_REF_TYPE" != tag ]; then
+            echo "::error::release: tag needs a tag push"
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: ${{ inputs.java-distribution }}
+          java-version: ${{ inputs.java-version }}
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-provider: basic
+
+      # Debug builds are signed with ~/.android/debug.keystore. Every runner
+      # makes a new one, and Android refuses to install an update signed with
+      # a different key, so a fixed key comes from this secret. Without it the
+      # build still works, but each nightly must be uninstalled first.
+      - name: Use the debug signing key
+        if: inputs.signing == 'debug'
+        env:
+          KEYSTORE: ${{ secrets.DEBUG_KEYSTORE }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo "::warning::DEBUG_KEYSTORE is not set: these APKs will not install over the previous ones"
+            exit 0
+          fi
+          mkdir -p ~/.android
+          printf '%s' "$KEYSTORE" | base64 --decode > ~/.android/debug.keystore
+
+      - name: Build
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          TASK: ${{ inputs.gradle-task }}
+          ARGS: ${{ inputs.gradle-args }}
+          LOCAL_PROPERTIES: ${{ inputs.local-properties }}
+        run: |
+          if [ -n "$LOCAL_PROPERTIES" ]; then
+            printf '%s\n' "$LOCAL_PROPERTIES" >> local.properties
+          fi
+          # ARGS is split into words on purpose: it holds several arguments.
+          # shellcheck disable=SC2086
+          ./gradlew "$TASK" $ARGS --no-daemon
+
+      # One APK per ABI and the universal one, under their asset names. A pattern
+      # with a dash on both sides keeps x86 from matching x86_64.
+      - name: Collect APKs
+        env:
+          APK_DIR: ${{ inputs.working-directory }}/${{ inputs.apk-dir }}
+          NAME: ${{ inputs.name }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          shopt -s nullglob
+          mkdir dist
+          for variant in arm64-v8a armeabi-v7a x86_64 x86 universal; do
+            matches=("$APK_DIR"/*-"$variant"-*.apk)
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "::error::expected one APK named *-$variant-*.apk in $APK_DIR, found ${#matches[@]}; are ABI splits enabled?"
+              ls -l "$APK_DIR"
+              exit 1
+            fi
+            cp "${matches[0]}" "dist/$NAME${VERSION:+-$VERSION}-$variant.apk"
+          done
+
+      # apksigner and aapt2 from the newest build-tools on the runner.
+      - name: Find build-tools
+        run: |
+          tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          echo "BUILD_TOOLS=$tools" >> "$GITHUB_ENV"
+
+      - name: Sign with the release key
+        id: sign
+        if: inputs.signing == 'apksigner'
+        env:
+          KEYSTORE: ${{ secrets.SIGNING_KEYSTORE }}
+          KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          RELEASE: ${{ inputs.release }}
+          ALIAS: ${{ inputs.key-alias }}
+          OLD_KEYSTORE: ${{ inputs.rotate-from-keystore }}
+          OLD_ALIAS: ${{ inputs.rotate-from-alias }}
+          OLD_PASSWORD: ${{ inputs.rotate-from-password }}
+          LINEAGE: ${{ inputs.rotate-lineage }}
+          MIN_SDK: ${{ inputs.rotate-min-sdk }}
+          SUBJECT: ${{ inputs.cert-subject }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            if [ "$RELEASE" = tag ]; then
+              echo "::error::SIGNING_KEYSTORE is required to sign a release"
+              exit 1
+            fi
+            echo "::warning::SIGNING_KEYSTORE is not set: the APKs keep Gradle's signature and are not published"
+            exit 0
+          fi
+          keystore="$RUNNER_TEMP/release.jks"
+          printf '%s' "$KEYSTORE" | base64 --decode > "$keystore"
+          trap 'rm -f "$keystore"' EXIT
+
+          # With a previous key, sign with both and the lineage so installs on the old key upgrade.
+          signers=(--ks "$keystore" --ks-key-alias "$ALIAS" --ks-pass env:KEY_PASSWORD)
+          verify=()
+          if [ -n "$OLD_KEYSTORE" ]; then
+            signers=(--ks "$OLD_KEYSTORE" --ks-key-alias "$OLD_ALIAS" --ks-pass env:OLD_PASSWORD
+              --next-signer "${signers[@]}" --lineage "$LINEAGE" --rotation-min-sdk-version "$MIN_SDK")
+            verify=(--min-sdk-version "$MIN_SDK")
+          fi
+
+          for apk in dist/*.apk; do
+            "$BUILD_TOOLS/apksigner" sign "${signers[@]}" "$apk"
+            certs=$("$BUILD_TOOLS/apksigner" verify "${verify[@]}" --print-certs "$apk")
+            grep -qF "$SUBJECT" <<< "$certs"
+          done
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Check the version code
+        id: version
+        env:
+          NAME: ${{ inputs.name }}
+          VERSION: ${{ inputs.version }}
+          EXPECTED: ${{ inputs.expected-version-code }}
+        run: |
+          code=$("$BUILD_TOOLS/aapt2" dump badging "dist/$NAME${VERSION:+-$VERSION}-universal.apk" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
+          echo "universal versionCode $code"
+          if [ -n "$EXPECTED" ] && [ "$code" != "$EXPECTED" ]; then
+            echo "::error::versionCode $code, expected $EXPECTED"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: apks
+          path: dist/*.apk
+          if-no-files-found: error
+
+      # The universal APK under old names, the manifest and the checksums.
+      - name: Prepare release files
+        env:
+          NAME: ${{ inputs.name }}
+          VERSION: ${{ inputs.version }}
+          ALIASES: ${{ inputs.aliases }}
+          MANIFEST: ${{ inputs.manifest }}
+          FIELDS: ${{ inputs.manifest-fields }}
+        run: |
+          cd dist
+          prefix="$NAME${VERSION:+-$VERSION}"
+          universal="$prefix-universal.apk"
+          for alias in $ALIASES; do
+            cp "$universal" "$alias"
+          done
+
+          if [ -n "$MANIFEST" ]; then
+              for variant in arm64-v8a armeabi-v7a x86_64 x86 universal; do
+              file="$prefix-$variant.apk"
+              code=$("$BUILD_TOOLS/aapt2" dump badging "$file" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
+              jq -n --arg abi "$variant" --arg name "$file" --argjson size "$(stat -c %s "$file")" --argjson code "$code" \
+                '{abi: $abi, name: $name, size: $size, version_code: $code}'
+            done | jq -s --argjson fields "$FIELDS" --arg commit "$GITHUB_SHA" --arg built_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              '(.[] | select(.abi == "universal")) as $u
+               | {commit: $commit, built_at: $built_at, version_code: $u.version_code, size: $u.size, apks: .} + $fields' \
+              > "$MANIFEST"
+            cat "$MANIFEST"
+          fi
+
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Publish the nightly release
+        if: inputs.release == 'nightly' && (inputs.signing == 'debug' || steps.sign.outputs.signed == 'true')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ inputs.title }}
+          NOTES: ${{ inputs.notes }}
+          NOTES_FILE: ${{ inputs.notes-file }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          title="${TITLE:-Nightly (${GITHUB_SHA::7})}"
+          notes="${NOTES:-Build of $GITHUB_SHA from $BRANCH, built $(date -u '+%Y-%m-%d %H:%M UTC'). Replaced on every push to $BRANCH.}"
+          [ -z "$NOTES_FILE" ] || notes="$(cat "$NOTES_FILE")"
+          gh release delete nightly --cleanup-tag --yes || true
+          gh release create nightly dist/* \
+            --prerelease --latest=false \
+            --target "$GITHUB_SHA" \
+            --title "$title" \
+            --notes "$notes"
+
+      - name: Publish the tag's release
+        if: inputs.release == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ inputs.title }}
+          NOTES: ${{ inputs.notes }}
+          NOTES_FILE: ${{ inputs.notes-file }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          notes="${NOTES:-Build of $TAG.}"
+          [ -z "$NOTES_FILE" ] || notes="$(cat "$NOTES_FILE")"
+          gh release create "$TAG" dist/* \
+            --title "${TITLE:-$TAG}" \
+            --notes "$notes"
