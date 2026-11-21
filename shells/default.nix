@@ -96,9 +96,12 @@
         # The Rust backend's test library expects libstdc++ and libgcc_s.
         LD_LIBRARY_PATH = lib.optionalString isLinux (lib.makeLibraryPath [pkgs.stdenv.cc.cc.lib]);
         # stdenv sets SOURCE_DATE_EPOCH to 1980 when unset, and Gradle reads
-        # it as the build time.
+        # it as the build time. Drop only that default: a value set before
+        # entering the shell (a reproducible build's commit time) stays.
         shellHook = ''
-          unset SOURCE_DATE_EPOCH
+          if [ "''${SOURCE_DATE_EPOCH-}" = 315532800 ]; then
+            unset SOURCE_DATE_EPOCH
+          fi
         '';
       });
 in {
