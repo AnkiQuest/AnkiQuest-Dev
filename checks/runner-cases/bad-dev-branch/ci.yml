@@ -1,5 +1,0 @@
-on:
-  pull_request:
-jobs:
-  test:
-    uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/labels.yml@feature

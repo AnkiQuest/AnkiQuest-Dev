@@ -1,6 +1,0 @@
-on:
-  pull_request:
-jobs:
-  test:
-    runs-on:
-      group: Default

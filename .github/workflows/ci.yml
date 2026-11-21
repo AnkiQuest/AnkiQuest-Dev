@@ -15,8 +15,7 @@ permissions:
 jobs:
   # Formatting and evaluation of the WSL system and every dev shell, and
   # actionlint; nothing large is built. Runs this pull request's own
-  # nix-check.yml, which routes merge queue groups and pushes to master to
-  # the self-hosted runners. The flake's checks include the formatting.
+  # nix-check.yml. The flake's checks include the formatting.
   flake:
     uses: ./.github/workflows/nix-check.yml
     with:

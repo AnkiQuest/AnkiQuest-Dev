@@ -51,14 +51,13 @@ on:
         default: false
       image:
         description: >-
-          On GitHub's runners, run every Nix command in this Docker image
-          (nixos/nix) instead of on the Ubuntu host. Like NixOS, that image
-          has no /lib64 loader or /usr/lib. The self-hosted runners are
-          NixOS and run the commands directly.
+          Run every Nix command in this Docker image (nixos/nix) instead of
+          on the Ubuntu host. Like NixOS, that image has no /lib64 loader or
+          /usr/lib.
         type: string
         default: ""
       free-disk-space:
-        description: On GitHub's runners, remove preinstalled SDKs first.
+        description: Remove the runner's preinstalled SDKs first.
         type: boolean
         default: false
       timeout-minutes:
@@ -74,16 +73,12 @@ defaults:
     shell: bash
 
 jobs:
-  # Merge queue groups and pushes to the caller's master run on AnkiQuest's
-  # self-hosted runners, everything else, pull requests included, on
-  # GitHub's (float3/nixos, nixos/runner-policy.nix); checks.runner-routing
-  # fails any other routing. github.event_name is the caller's event.
   check:
-    runs-on: ${{ (github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) && fromJSON('["self-hosted","Linux","X64","ankiquest","build"]') || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - name: Free disk space
-        if: inputs.free-disk-space && runner.environment == 'github-hosted'
+        if: inputs.free-disk-space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
@@ -92,10 +87,9 @@ jobs:
         with:
           persist-credentials: false
 
-      # The self-hosted runners bring their own single-user Nix, and the
-      # image its own.
+      # The image brings its own Nix.
       - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
-        if: runner.environment == 'github-hosted' && inputs.image == ''
+        if: inputs.image == ''
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
@@ -108,7 +102,7 @@ jobs:
       # and so the store, from one step to the next.
       - name: Choose where Nix runs
         env:
-          IMAGE: ${{ runner.environment == 'github-hosted' && inputs.image || '' }}
+          IMAGE: ${{ inputs.image }}
         run: |
           wrapper="$RUNNER_TEMP/in-nix"
           if [ -z "$IMAGE" ]; then
