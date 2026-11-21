@@ -1,5 +1,0 @@
-on:
-  pull_request:
-jobs:
-  test:
-    runs-on: ${{ github.ref == 'refs/heads/main' && fromJSON('["self-hosted"]') || 'ubuntu-24.04' }}

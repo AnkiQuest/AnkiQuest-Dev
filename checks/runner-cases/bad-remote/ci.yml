@@ -1,5 +1,0 @@
-on:
-  pull_request:
-jobs:
-  test:
-    uses: AnkiQuest/AnkiQuest-Server/.github/workflows/ci.yml@master

@@ -1,5 +1,0 @@
-on:
-  pull_request:
-jobs:
-  test:
-    runs-on: [self-hosted, ankiquest]
