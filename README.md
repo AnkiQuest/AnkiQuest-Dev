@@ -368,7 +368,9 @@ Workflows more than one repository runs are reusable workflows in
 |---|---|---|
 | `android-ci.yml` | Gradle build, lint and unit tests with Temurin 17; `nix flake check` and a debug build in the repository's dev shell | `working-directory`, `jobs` (`gradle nix`, or one of them) |
 | `android-nightly.yml` | A debug APK published as the `nightly` pre-release | `name`, `working-directory`; secret `NIGHTLY_DEBUG_KEYSTORE`; the caller grants `contents: write` |
-| `labels.yml`, `conflict-scan.yml`, `pr-labels.yml`, `issue-labels.yml` | The shared label set (`labels.json`), "Has Conflicts", "Needs Review", "New contributor", area labels from the caller's `.github/labeler.yml`, "Needs Triage" | none; `ankiquest-labels.yml` is the caller every repository copies |
+| `labels.yml`, `pr-labels.yml`, `issue-labels.yml` | The shared label set (`labels.json`), "Needs Review", "New contributor", area labels from the caller's `.github/labeler.yml`, "Needs Triage" | none; `ankiquest-labels.yml` is the caller every repository copies |
+
+The conflict scan ("Has Conflicts") is an action, `.github/actions/conflict-scan`, run by the caller's own job named `scan`: the rulesets require a check with that exact name, and a job that calls a reusable workflow reports as `<job> / scan`.
 
 `tests/labels.test.ts` tests the label set and the scripts:
 `nix develop .#gallery -c node --experimental-strip-types --test tests/*.test.ts`.

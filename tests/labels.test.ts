@@ -33,11 +33,22 @@ function labellingWorkflows(): string[] {
   return fs.readdirSync(workflows).filter(file => /\.ya?ml$/.test(file) && LABELLING.test(read(file)));
 }
 
+// Area labels are the top-level keys of this repository's labeler config,
+// which the area job of pr-labels.yml requires.
+function labelerNames(): string[] {
+  const text = fs.readFileSync(path.join(root, '.github', 'labeler.yml'), 'utf8');
+  return [...text.matchAll(/^([A-Za-z_][^:\n]*):$/gm)].map(match => match[1]);
+}
+
+// The conflict scan, an action so the calling job keeps the name "scan".
+const CONFLICT_SCAN = path.join(root, '.github', 'actions', 'conflict-scan', 'action.yml');
+
 // Label names in the shared workflow scripts: LABEL constants and add/remove calls.
 function workflowNames(): string[] {
   const names: string[] = [];
-  for (const file of labellingWorkflows()) {
-    for (const match of read(file).matchAll(/(?:LABEL = |add\(|remove\()'([^']+)'/g)) {
+  const texts = [...labellingWorkflows().map(read), fs.readFileSync(CONFLICT_SCAN, 'utf8')];
+  for (const text of texts) {
+    for (const match of text.matchAll(/(?:LABEL = |add\(|remove\()'([^']+)'/g)) {
       names.push(match[1]);
     }
   }
@@ -129,7 +140,7 @@ test('labels.json entries are well formed and unique ignoring case', () => {
 
 test('labels.json holds every label the workflows apply, spelled the same', () => {
   const names = new Set(labels.map(label => label.name));
-  const used = [...workflowNames(), ...DEPENDABOT];
+  const used = [...workflowNames(), ...labelerNames(), ...DEPENDABOT];
   assert.ok(workflowNames().length > 0);
   for (const name of used) {
     assert.ok(names.has(name), `${name} is missing from labels.json`);
@@ -137,12 +148,20 @@ test('labels.json holds every label the workflows apply, spelled the same', () =
 });
 
 test('the label workflows are reusable and the caller calls each of them', () => {
-  const called = [...read(CALLER).matchAll(/AnkiQuest-Dev\/\.github\/workflows\/(\S+\.yml)@main/g)].map(match => match[1]);
+  const called = [...read(CALLER).matchAll(/AnkiQuest-Dev\/\.github\/workflows\/(\S+\.yml)@master/g)].map(match => match[1]);
   const reusable = [...labellingWorkflows()].filter(file => file !== CALLER);
   assert.deepEqual([...called].sort(), [...reusable].sort());
   for (const file of reusable) {
     assert.match(read(file), /^on:\n {2}workflow_call:\n/m, file);
   }
+});
+
+test('the caller runs the conflict scan in a job named scan', () => {
+  // The rulesets require this exact check name.
+  const job = read(CALLER).match(/\n {2}scan:\n((?: {4}.*\n| {6}.*\n)+)/);
+  assert.ok(job, `${CALLER} has no job scan`);
+  assert.match(job[1], /uses: AnkiQuest\/AnkiQuest-Dev\/\.github\/actions\/conflict-scan@master/);
+  assert.doesNotMatch(job[1], /^ {4}uses:/m);
 });
 
 // The `on:` types of one trigger in the pull request labels workflow.
