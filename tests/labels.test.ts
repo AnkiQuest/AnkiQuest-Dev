@@ -1,10 +1,10 @@
 // The shared label set in labels.json is valid and holds every label the
-// reusable workflows and Dependabot apply. The pull request status script
-// keeps "Needs Review" on open, ready pull requests that no other member has
-// approved. The caller, ankiquest-labels.yml, is the one every repository
-// copies.
+// reusable workflows and Dependabot apply. needs-review.cjs keeps "Needs
+// Review" on pull requests that wait on a reviewer, from the status and sweep
+// jobs. The caller, ankiquest-labels.yml, is the one every repository copies.
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
+import {createRequire} from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -14,6 +14,13 @@ const root = path.resolve(import.meta.dirname, '..');
 const workflows = path.join(root, '.github', 'workflows');
 const read = (file: string) => fs.readFileSync(path.join(workflows, file), 'utf8');
 const labels = JSON.parse(fs.readFileSync(path.join(root, 'labels.json'), 'utf8')) as Label[];
+
+// The rule, and where the jobs check it out: AnkiQuest-Dev's master in
+// ./ankiquest-dev of the calling repository.
+const RULE = path.join(root, '.github', 'scripts', 'needs-review.cjs');
+const CHECKOUT = './ankiquest-dev/';
+const nodeRequire = createRequire(import.meta.url);
+const {State, reviewState} = nodeRequire(RULE);
 
 // GitHub's limits for a label, and the labels Dependabot adds by default for
 // the ecosystems in .github/dependabot.yml.
@@ -43,12 +50,12 @@ function labelerNames(): string[] {
 // The conflict scan, an action so the calling job keeps the name "scan".
 const CONFLICT_SCAN = path.join(root, '.github', 'actions', 'conflict-scan', 'action.yml');
 
-// Label names in the shared workflow scripts: LABEL constants and add/remove calls.
+// Label names in the shared workflow scripts: constants and add/remove calls.
 function workflowNames(): string[] {
   const names: string[] = [];
-  const texts = [...labellingWorkflows().map(read), fs.readFileSync(CONFLICT_SCAN, 'utf8')];
+  const texts = [...labellingWorkflows().map(read), ...[CONFLICT_SCAN, RULE].map(file => fs.readFileSync(file, 'utf8'))];
   for (const text of texts) {
-    for (const match of text.matchAll(/(?:LABEL = |add\(|remove\()'([^']+)'/g)) {
+    for (const match of text.matchAll(/(?:[A-Z]+ = |add\(|remove\()'([^']+)'/g)) {
       names.push(match[1]);
     }
   }
@@ -66,8 +73,9 @@ function jobScript(file: string, job: string): string {
   return block[2].split('\n').map(line => line.slice(indent)).join('\n');
 }
 
-interface Call {action: string; labels: string[]}
-interface Review {login: string; state: string; association?: string}
+interface Call {action: string; labels: string[]; number?: number}
+// A review's commit is the pull request's head unless it says otherwise.
+interface Review {login: string; state: string; association?: string; commit?: string}
 
 // One pull request as the status script sees it: the event that ran it and
 // the pull request and reviews the GitHub API returns.
@@ -79,48 +87,77 @@ interface Pull {
   labels?: string[];
   reviews?: Review[];
   fork?: boolean;
+  number?: number;
+}
+
+// Requires the rule from the checkout path the jobs use.
+function jobRequire(file: string): unknown {
+  assert.ok(file.startsWith(CHECKOUT), `required ${file} outside the AnkiQuest-Dev checkout`);
+  return nodeRequire(path.join(root, file.slice(CHECKOUT.length)));
 }
 
 const REPO = {owner: 'AnkiQuest', repo: 'test'};
 const AUTHOR = 'author';
+const HEAD = 'head-sha';
 
-// Runs one job's github-script for one event against a fake GitHub API and
-// returns the label changes it makes.
-async function run(job: string, pull: Pull, association = 'MEMBER'): Promise<Call[]> {
-  const calls: Call[] = [];
+// A pull request and its reviews as the GitHub API returns them.
+function pullRequest(pull: Pull, association = 'MEMBER') {
   const labels = (pull.labels ?? []).map(name => ({name}));
-  const head = {repo: {full_name: pull.fork ? 'someone/test' : 'AnkiQuest/test'}};
+  const head = {sha: HEAD, repo: {full_name: pull.fork ? 'someone/test' : 'AnkiQuest/test'}};
   const pr = {
-    number: 1, state: pull.state ?? 'open', draft: pull.draft ?? false, labels, head,
+    number: pull.number ?? 1, state: pull.state ?? 'open', draft: pull.draft ?? false, labels, head,
     user: {login: AUTHOR}, author_association: association,
   };
   const reviews = (pull.reviews ?? []).map((review, index) => ({
     id: index, user: {login: review.login}, state: review.state,
-    author_association: review.association ?? 'MEMBER',
+    author_association: review.association ?? 'MEMBER', commit_id: review.commit ?? HEAD,
   }));
+  return {pr, reviews};
+}
+
+// Runs one job's github-script against a fake GitHub API serving `pulls`,
+// for an event on the first of them, and returns the label changes it makes.
+async function runAll(job: string, pulls: Pull[], association = 'MEMBER'): Promise<Call[]> {
+  const calls: Call[] = [];
+  const pull = pulls[0] ?? {action: ''};
+  const served = pulls.map(item => pullRequest(item, association));
+  const find = (number: number) => served.find(item => item.pr.number === number)!;
   const issues = {
-    addLabels: async (args: {labels: string[]}) => { calls.push({action: 'add', labels: args.labels}); },
-    removeLabel: async (args: {name: string}) => { calls.push({action: 'remove', labels: [args.name]}); },
-  };
-  const pulls = {
-    get: async () => {
-      assert.ok(!(pull.event === 'pull_request_review' && pull.fork), 'read-only run called the API');
-      return {data: pr};
+    addLabels: async (args: {issue_number: number; labels: string[]}) => {
+      calls.push({action: 'add', labels: args.labels, ...number(args.issue_number)});
     },
-    listReviews: async () => ({data: reviews}),
+    removeLabel: async (args: {issue_number: number; name: string}) => {
+      calls.push({action: 'remove', labels: [args.name], ...number(args.issue_number)});
+    },
   };
-  const paginate = async (method: () => Promise<{data: unknown[]}>) => (await method()).data;
+  // Calls name their pull request only when the job serves several.
+  const number = (issue: number) => (pulls.length > 1 ? {number: issue} : {});
+  const api = {
+    get: async (args: {pull_number: number}) => {
+      assert.ok(!(pull.event === 'pull_request_review' && pull.fork), 'read-only run called the API');
+      return {data: find(args.pull_number).pr};
+    },
+    list: async (args: {state: string}) => {
+      assert.equal(args.state, 'open');
+      return {data: served.map(item => item.pr).filter(pr => pr.state === 'open')};
+    },
+    listReviews: async (args: {pull_number: number}) => ({data: find(args.pull_number).reviews}),
+  };
+  const paginate = async (method: (args: never) => Promise<{data: unknown[]}>, args: never) => (await method(args)).data;
   const context = {
     repo: REPO,
     eventName: pull.event ?? 'pull_request_target',
-    payload: {action: pull.action, pull_request: pr},
+    payload: {action: pull.action, pull_request: served[0]?.pr},
   };
   const core = {info: () => {}, notice: () => {}};
   const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
   const script = jobScript(PULL_REQUESTS, job);
-  await new AsyncFunction('github', 'context', 'core', script)({rest: {issues, pulls}, paginate}, context, core);
+  const github = {rest: {issues, pulls: api}, paginate};
+  await new AsyncFunction('github', 'context', 'core', 'require', script)(github, context, core, jobRequire);
   return calls;
 }
+
+const run = (job: string, pull: Pull, association = 'MEMBER') => runAll(job, [pull], association);
 
 const status = (pull: Pull) => run('status', pull);
 
@@ -234,15 +271,40 @@ test('a push keeps an approval that was not dismissed', async () => {
   assert.deepEqual(await status({action: 'synchronize'}), [add]);
 });
 
-test('changes requested after the last approval need review', async () => {
+test('changes requested on the current head wait on the author', async () => {
   const review = {event: 'pull_request_review', action: 'submitted'};
   const changes = {login: 'other', state: 'CHANGES_REQUESTED'};
-  assert.deepEqual(await status({...review, reviews: [approved, changes]}), [add]);
-  assert.deepEqual(await status({...review, labels: ['Needs Review'], reviews: [changes, approved]}), [remove]);
+  assert.deepEqual(await status({...review, reviews: [changes]}), []);
+  assert.deepEqual(await status({...review, labels: ['Needs Review'], reviews: [changes]}), [remove]);
 
-  // A reviewer who approves after asking for changes approves.
+  // A change request after the last approval outweighs it.
+  assert.deepEqual(await status({...review, labels: ['Needs Review'], reviews: [approved, changes]}), [remove]);
+
+  // An approval after a change request approves.
+  assert.deepEqual(await status({...review, labels: ['Needs Review'], reviews: [changes, approved]}), [remove]);
   const asked = {login: 'reviewer', state: 'CHANGES_REQUESTED'};
   assert.deepEqual(await status({...review, labels: ['Needs Review'], reviews: [asked, approved]}), [remove]);
+});
+
+test('a push after a change request needs review again', async () => {
+  const older = {login: 'other', state: 'CHANGES_REQUESTED', commit: 'older-sha'};
+  assert.deepEqual(await status({action: 'synchronize', reviews: [older]}), [add]);
+  assert.deepEqual(await status({action: 'synchronize', reviews: [approved, older]}), [add]);
+
+  // One member's change request on the head is enough to wait on the author.
+  const current = {login: 'reviewer', state: 'CHANGES_REQUESTED'};
+  assert.deepEqual(await status({action: 'synchronize', labels: ['Needs Review'], reviews: [older, current]}), [remove]);
+});
+
+test('only a change request by another member waits on the author', async () => {
+  const review = {event: 'pull_request_review', action: 'submitted'};
+  assert.deepEqual(await status({...review, reviews: [{login: AUTHOR, state: 'CHANGES_REQUESTED'}]}), [add]);
+  assert.deepEqual(await status({...review, reviews: [{login: 'visitor', state: 'CHANGES_REQUESTED', association: 'NONE'}]}), [add]);
+
+  // A dismissed change request, or a comment after it, is no change request.
+  const asked = {login: 'other', state: 'CHANGES_REQUESTED'};
+  assert.deepEqual(await status({...review, reviews: [{login: 'other', state: 'DISMISSED'}]}), [add]);
+  assert.deepEqual(await status({...review, labels: ['Needs Review'], reviews: [asked, {login: 'other', state: 'COMMENTED'}]}), [remove]);
 });
 
 test('draft and closed pull requests never keep Needs Review', async () => {
@@ -275,4 +337,92 @@ test('a newer event cancels an older status run of the same pull request', () =>
 
   // Skipped fork review runs must not cancel a run that can label.
   assert.match(jobConcurrency('status').group ?? '', /pull_request_review/);
+});
+
+// The state of one pull request under the rule.
+const state = (pull: Pull) => {
+  const {pr, reviews} = pullRequest(pull);
+  return reviewState(pr, reviews);
+};
+
+test('reviewState names every state a pull request can be in', () => {
+  const changes = {login: 'other', state: 'CHANGES_REQUESTED'};
+  assert.equal(state({action: '', state: 'closed', reviews: [changes]}), State.CLOSED);
+  assert.equal(state({action: '', draft: true, reviews: [approved]}), State.DRAFT);
+  assert.equal(state({action: '', reviews: [approved]}), State.APPROVED);
+  assert.equal(state({action: '', reviews: [changes]}), State.WAITING_ON_AUTHOR);
+  assert.equal(state({action: ''}), State.NEEDS_REVIEW);
+  assert.deepEqual(Object.values(State).sort(), ['approved', 'closed', 'draft', 'needs_review', 'waiting_on_author']);
+});
+
+test('reviewState moves between review states as reviews and pushes come in', () => {
+  const changes = {login: 'other', state: 'CHANGES_REQUESTED'};
+  const pushed = {...changes, commit: 'older-sha'};
+
+  // Opened, changes requested, pushed, approved.
+  assert.equal(state({action: ''}), State.NEEDS_REVIEW);
+  assert.equal(state({action: '', reviews: [changes]}), State.WAITING_ON_AUTHOR);
+  assert.equal(state({action: '', reviews: [pushed]}), State.NEEDS_REVIEW);
+  assert.equal(state({action: '', reviews: [pushed, approved]}), State.APPROVED);
+
+  // An approval, then changes requested by another member, then a push.
+  assert.equal(state({action: '', reviews: [approved, changes]}), State.WAITING_ON_AUTHOR);
+  assert.equal(state({action: '', reviews: [approved, pushed]}), State.NEEDS_REVIEW);
+
+  // A dismissed approval or change request no longer counts.
+  assert.equal(state({action: '', reviews: [{login: 'reviewer', state: 'DISMISSED'}]}), State.NEEDS_REVIEW);
+  assert.equal(state({action: '', reviews: [changes, {login: 'other', state: 'DISMISSED'}]}), State.NEEDS_REVIEW);
+
+  // Closing and drafting win over any review.
+  assert.equal(state({action: '', state: 'closed', reviews: [approved]}), State.CLOSED);
+  assert.equal(state({action: '', draft: true, reviews: [changes]}), State.DRAFT);
+});
+
+test('the sweep applies the rule to every open pull request', async () => {
+  const sweep = (pulls: Pull[]) => runAll('sweep', pulls.map(pull => ({event: 'schedule', ...pull})));
+  const changes = {login: 'other', state: 'CHANGES_REQUESTED'};
+  assert.deepEqual(await sweep([
+    // Approved under an older rule, still labelled.
+    {action: '', number: 103, labels: ['Needs Review'], reviews: [approved]},
+    // Waiting on its author.
+    {action: '', number: 104, labels: ['Needs Review'], reviews: [changes]},
+    // Missing its label, from a fork.
+    {action: '', number: 105, fork: true},
+    // Already right.
+    {action: '', number: 106, labels: ['Needs Review']},
+    {action: '', number: 107, draft: true},
+    // Closed pull requests are not listed.
+    {action: '', number: 108, state: 'closed', labels: ['Needs Review']},
+  ]), [
+    {...remove, number: 103},
+    {...remove, number: 104},
+    {...add, number: 105},
+  ]);
+});
+
+test('the caller sweeps on schedule and workflow_dispatch', () => {
+  const job = read(CALLER).match(/\n {2}pull-requests:\n((?: {4}.*\n| {6}.*\n)+)/);
+  assert.ok(job, `${CALLER} has no job pull-requests`);
+  for (const event of ['pull_request_target', 'pull_request_review', 'schedule', 'workflow_dispatch']) {
+    assert.match(job[1], new RegExp(`"${event}"`), event);
+  }
+  assert.match(job[1], /pull-requests: write/);
+  assert.match(read(PULL_REQUESTS), /\n {2}sweep:\n {4}if: github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\n/);
+});
+
+test('the status and sweep jobs load the rule from AnkiQuest-Dev, never pull request code', () => {
+  const text = read(PULL_REQUESTS);
+  for (const job of ['status', 'sweep']) {
+    // The job runs up to the next job's header.
+    const start = text.indexOf(`\n  ${job}:\n`);
+    const next = text.slice(start + 1).search(/\n {2}[a-z-]+:\n/);
+    const block = text.slice(start, next < 0 ? undefined : start + 1 + next);
+    const checkout = block.match(/- uses: actions\/checkout@\S+.*\n {8}with:\n((?: {10}.*\n)+)/);
+    assert.ok(checkout, `${job} has no checkout`);
+    assert.match(checkout[1], /repository: AnkiQuest\/AnkiQuest-Dev\n/, job);
+    assert.match(checkout[1], /ref: master\n/, job);
+    assert.match(checkout[1], /path: ankiquest-dev\n/, job);
+    assert.match(checkout[1], /persist-credentials: false\n/, job);
+    assert.match(jobScript(PULL_REQUESTS, job), /require\('\.\/ankiquest-dev\/\.github\/scripts\/needs-review\.cjs'\)/, job);
+  }
 });

@@ -2,22 +2,28 @@ name: Pull Request Labels
 
 # Keeps pull request labels current:
 # - area labels from the changed paths (.github/labeler.yml)
-# - "Needs Review" while a pull request is open, not a draft and not
-#   approved by another member
+# - "Needs Review" while a pull request waits on a reviewer: open, not a
+#   draft, not approved by another member and with no member's change
+#   request on its current head (.github/scripts/needs-review.cjs)
 # - "New contributor" on a first pull request from someone new to the repo
 # - workflow labels are cleared when a pull request is closed
 #
 # pull_request_target runs the base branch's workflow with a token that can
 # label pull requests from forks. pull_request_review runs the pull
 # request's own workflow, with a read-only token for pull requests from
-# forks; their reviews are skipped and picked up by the next push or state
-# change. Nothing here checks out or runs pull request code: the jobs only
-# read the event payload and the GitHub API.
+# forks; their reviews are skipped and picked up by the next push, state
+# change or sweep. The sweep, on schedule and workflow_dispatch, applies the
+# same rule to every open pull request, so labels set by older rules or
+# missed runs are corrected.
+#
+# Nothing here checks out or runs pull request code: the jobs read the event
+# payload and the GitHub API, and load needs-review.cjs from a checkout of
+# AnkiQuest-Dev's master.
 #
 # Reusable: each repository calls it from pull_request_target (opened,
 # reopened, synchronize, ready_for_review, converted_to_draft, closed),
-# pull_request_review (submitted, dismissed) and merge_group, and keeps its own
-# .github/labeler.yml.
+# pull_request_review (submitted, dismissed), schedule, workflow_dispatch and
+# merge_group, and keeps its own .github/labeler.yml.
 
 on:
   workflow_call:
@@ -55,92 +61,70 @@ jobs:
       contents: read
       pull-requests: write
     steps:
+      # The rule, from AnkiQuest-Dev's master like this workflow; never the
+      # pull request's code.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: AnkiQuest/AnkiQuest-Dev
+          ref: master
+          path: ankiquest-dev
+          persist-credentials: false
+          sparse-checkout: .github/scripts/needs-review.cjs
+          sparse-checkout-cone-mode: false
+
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           retries: 3
           script: |
             const { owner, repo } = context.repo;
-            const LABEL = 'Needs Review';
+            const { LABEL, syncLabels } = require('./ankiquest-dev/.github/scripts/needs-review.cjs');
             const pull_number = context.payload.pull_request.number;
-            const issue_number = pull_number;
-
-            // Reviews count from members only; GitHub ignores other approvals too.
-            const MEMBERS = ['OWNER', 'MEMBER', 'COLLABORATOR'];
-            const DECISIONS = ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'];
 
             // Review runs for pull requests from forks have a read-only token.
             const head = context.payload.pull_request.head.repo?.full_name;
             if (context.eventName === 'pull_request_review' && head !== `${owner}/${repo}`) {
-              core.notice(`Skipped: a review of a pull request from ${head ?? 'a deleted fork'} runs with a read-only token. "${LABEL}" is updated on the next push or state change.`);
+              core.notice(`Skipped: a review of a pull request from ${head ?? 'a deleted fork'} runs with a read-only token. "${LABEL}" is updated on the next push, state change or sweep.`);
               return;
             }
 
             // Read the pull request now: a queued run's payload can be stale.
             const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number });
+            await syncLabels({ github, core, owner, repo, pr });
 
-            // Label names are case-insensitive on GitHub.
-            const has = (name) => pr.labels.some((label) => label.name.toLowerCase() === name.toLowerCase());
+  # Applies the status rule to every open pull request, including those from
+  # forks: the scheduled run has the repository's own token.
+  sweep:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: ${{ github.workflow }}-sweep
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # The rule, from AnkiQuest-Dev's master like this workflow.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: AnkiQuest/AnkiQuest-Dev
+          ref: master
+          path: ankiquest-dev
+          persist-credentials: false
+          sparse-checkout: .github/scripts/needs-review.cjs
+          sparse-checkout-cone-mode: false
 
-            async function add(name) {
-              if (has(name)) {
-                return;
-              }
-              core.info(`Adding "${name}"`);
-              await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [name] });
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          retries: 3
+          script: |
+            const { owner, repo } = context.repo;
+            const { syncLabels } = require('./ankiquest-dev/.github/scripts/needs-review.cjs');
+
+            const pulls = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 });
+            for (const pr of pulls) {
+              await syncLabels({ github, core, owner, repo, pr });
             }
-
-            async function remove(name) {
-              if (!has(name)) {
-                return;
-              }
-              core.info(`Removing "${name}"`);
-              try {
-                await github.rest.issues.removeLabel({ owner, repo, issue_number, name });
-              } catch (error) {
-                if (error.status !== 404) {
-                  throw error;
-                }
-              }
-            }
-
-            // Closed pull requests keep no workflow labels.
-            if (pr.state === 'closed') {
-              await remove(LABEL);
-              await remove('Has Conflicts');
-              return;
-            }
-
-            if (pr.draft) {
-              await remove(LABEL);
-              return;
-            }
-
-            // Each member's latest decision and its position in the review
-            // list. A comment keeps an earlier decision; a review dismissed,
-            // by hand or by branch protection on a push, has state DISMISSED.
-            const reviews = await github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number, per_page: 100 });
-            const latest = new Map();
-            for (const [index, review] of reviews.entries()) {
-              const login = review.user?.login;
-              if (!login || login === pr.user.login) {
-                continue;
-              }
-              if (!MEMBERS.includes(review.author_association) || !DECISIONS.includes(review.state)) {
-                continue;
-              }
-              latest.set(login, { state: review.state, index });
-            }
-
-            // Approved: a standing approval with no change request after it.
-            const last = (state) => Math.max(-1, ...[...latest.values()].filter((d) => d.state === state).map((d) => d.index));
-            const approval = last('APPROVED');
-            if (approval >= 0 && last('CHANGES_REQUESTED') < approval) {
-              core.info(`Approved by review ${reviews[approval].id}`);
-              await remove(LABEL);
-              return;
-            }
-
-            await add(LABEL);
 
   newcomer:
     if: github.event_name == 'pull_request_target' && github.event.action == 'opened'
