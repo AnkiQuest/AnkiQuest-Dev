@@ -1,0 +1,158 @@
+name: Code changed
+description: >-
+  Tells whether a change touched anything besides documentation: output
+  `code` is 'false' only when every changed file matches a docs glob.
+
+# Jobs that cost time take `needs: changes` and
+# `if: needs.changes.outputs.code == 'true'`; a job skipped by `if` counts
+# as passing a required check. The diff comes from the GitHub API, so no
+# checkout is needed:
+#   pull_request, pull_request_target: the pull request (base...head)
+#   merge_group: the queue entry (base_sha...head_sha)
+#   push: before...after; a new branch or a force push is 'true'
+# Every other event (workflow_dispatch, schedule, ...), an empty diff, an
+# API error and a diff too large to list are 'true'. The job needs
+# contents: read; pull requests of more than 300 files also need
+# pull-requests: read, else they are 'true'. match.sh holds the glob rules.
+#
+#   jobs:
+#     changes:
+#       runs-on: ubuntu-latest
+#       outputs:
+#         code: ${{ steps.changed.outputs.code }}
+#       steps:
+#         - id: changed
+#           uses: AnkiQuest/AnkiQuest-Dev/.github/actions/code-changed@<commit>
+inputs:
+  docs:
+    description: Globs of documentation files, one per line. `**` spans directories, `*` and `?` do not.
+    default: |
+      **/*.md
+      LICENSE*
+      LICENSES/**
+      docs/**
+      .github/ISSUE_TEMPLATE/**
+      .github/pull_request_template.md
+  extra-docs:
+    description: More documentation globs, one per line, added to `docs`.
+    default: ""
+  token:
+    description: The token for the GitHub API.
+    default: ${{ github.token }}
+outputs:
+  code:
+    description: "'true' unless every changed file matches a docs glob."
+    value: ${{ steps.decide.outputs.code }}
+
+runs:
+  using: composite
+  steps:
+    - id: decide
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        DOCS: ${{ inputs.docs }}
+        EXTRA_DOCS: ${{ inputs.extra-docs }}
+        MATCH: ${{ github.action_path }}/match.sh
+        EVENT: ${{ github.event_name }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_BASE: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        GROUP_HEAD: ${{ github.event.merge_group.head_sha }}
+        BEFORE: ${{ github.event.before }}
+        AFTER: ${{ github.event.after }}
+        CREATED: ${{ github.event.created }}
+        FORCED: ${{ github.event.forced }}
+      run: |
+        # The compare API lists at most 300 files, a pull request's files
+        # API at most 3000.
+        COMPARE_LIMIT=300
+        PULL_LIMIT=3000
+
+        # The commits to compare, or why there is nothing to compare.
+        base='' head='' reason=''
+        case "$EVENT" in
+          pull_request | pull_request_target)
+            base=$PR_BASE head=$PR_HEAD ;;
+          merge_group)
+            base=$GROUP_BASE head=$GROUP_HEAD ;;
+          push)
+            if [[ $CREATED == true || $FORCED == true || -z $BEFORE || $BEFORE =~ ^0+$ ]]; then
+              reason='a new branch or a force push has no usable before commit'
+            else
+              base=$BEFORE head=$AFTER
+            fi
+            ;;
+          *)
+            reason="the $EVENT event has no diff" ;;
+        esac
+
+        # The changed files, with the old name of renamed ones: moving code
+        # into docs/ changes code.
+        files=()
+        if [[ -z $reason ]]; then
+          if ! listed=$(gh api "repos/$GITHUB_REPOSITORY/compare/$base...$head" \
+            --jq '.status, (.files | length), (.files[] | .filename, (.previous_filename // empty))'); then
+            reason='the compare API failed'
+          else
+            mapfile -t lines <<< "$listed"
+            status=${lines[0]} count=${lines[1]}
+            files=("${lines[@]:2}")
+            if [[ $EVENT == push && $status != ahead && $status != identical ]]; then
+              reason="the push is $status, not ahead of the previous head"
+            elif ((count >= COMPARE_LIMIT)) && [[ -n $PR_NUMBER ]]; then
+              if ! listed=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" \
+                --jq '.[] | .filename, (.previous_filename // empty)'); then
+                reason="more than $COMPARE_LIMIT files and the pull request files API failed"
+              else
+                mapfile -t files <<< "$listed"
+                if ((${#files[@]} >= PULL_LIMIT)); then
+                  reason="$PULL_LIMIT files or more, more than the API lists"
+                fi
+              fi
+            elif ((count >= COMPARE_LIMIT)); then
+              reason="$COMPARE_LIMIT files or more, more than the API lists"
+            fi
+          fi
+        fi
+        if [[ -z $reason && ( ${#files[@]} -eq 0 || -z ${files[0]} ) ]]; then
+          reason='no file changed'
+        fi
+
+        # Sort the files; any code file makes the change code.
+        code=true
+        sorted=''
+        if [[ -z $reason ]]; then
+          sorted=$(printf '%s\n' "${files[@]}" | GLOBS="$DOCS"$'\n'"$EXTRA_DOCS" bash "$MATCH")
+          if ! grep -q $'^code\t' <<< "$sorted"; then
+            code=false
+            reason='every changed file is documentation'
+          else
+            reason="$(grep -c $'^code\t' <<< "$sorted") of ${#files[@]} files are not documentation"
+          fi
+        fi
+        echo "code=$code" >> "$GITHUB_OUTPUT"
+        echo "code=$code: $reason"
+        if [[ -n $sorted ]]; then
+          printf '%s\n' "$sorted"
+        fi
+
+        # The decision and the files in the step summary.
+        {
+          echo "### Code changed: \`$code\`"
+          echo
+          echo "$reason."
+          if [[ -n $sorted ]]; then
+            echo
+            echo '<details><summary>Changed files</summary>'
+            echo
+            echo '| Kind | File |'
+            echo '|---|---|'
+            while IFS=$'\t' read -r kind path; do
+              echo "| $kind | \`$path\` |"
+            done <<< "$sorted"
+            echo
+            echo '</details>'
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"

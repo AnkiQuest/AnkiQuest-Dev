@@ -366,17 +366,46 @@ Workflows more than one repository runs are reusable workflows in
 
 | Workflow | Does | Inputs |
 |---|---|---|
-| `android-ci.yml` | Gradle build, lint and unit tests with Temurin 17; `nix flake check` and a debug build in the repository's dev shell | `working-directory`, `jobs` (`gradle nix`, or one of them) |
+| `android-ci.yml` | Gradle build, lint and unit tests with Temurin 17; `nix flake check` and a debug build in the repository's dev shell | `working-directory`, `jobs` (`gradle nix`, or one of them), `skip` |
 | `android-release.yml` | One APK per ABI (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`) and a universal one, from Gradle ABI splits, published as the `nightly` pre-release or the pushed tag's release as `<name>-<version>-<abi>.apk` and `<name>-<version>-universal.apk` with `SHA256SUMS.txt`; self-updating apps pick the first of `Build.SUPPORTED_ABIS` with an asset, else universal | `name`, `version` (empty leaves it out of the names), `release` (`nightly`, `tag`, `none`), `working-directory`, `gradle-task`, `gradle-args`, `apk-dir`, `local-properties`, `java-distribution`, `java-version`, `signing` (`debug` with secret `DEBUG_KEYSTORE`, or `apksigner` with secrets `SIGNING_KEYSTORE`, `SIGNING_KEY_PASSWORD` and `key-alias`, `rotate-from-*`, `rotate-lineage`, `rotate-min-sdk`, `cert-subject`), `expected-version-code`, `aliases`, `manifest`, `manifest-fields`, `title`, `notes`, `notes-file`, `timeout-minutes`; the caller grants `contents: write` |
 | `banner.yml` | Draws the README banner and social preview with `ankiquest-banner` and fails unless the committed images have the same pixels; uploads the drawings as the `banner` artifact | `server-sha-file` (the pinned AnkiQuest-Server commit; empty in AnkiQuest-Server), `screens-artifact` and `screens-path` (screens not committed), `on-stale` (`fail` or `report`; output `stale`) |
-| `nix-check.yml` | `nix flake check`, the formatter's check, actionlint and the caller's commands in its dev shell | `flake` (`.`, or `github:AnkiQuest/AnkiQuest-Dev` without a flake), `flake-check`, `all-systems`, `format` (paths, empty skips), `actionlint`, `run`, `rust-cache`, `image` (`nixos/nix` on GitHub's runners), `free-disk-space`, `timeout-minutes` |
+| `nix-check.yml` | `nix flake check`, the formatter's check, actionlint and the caller's commands in its dev shell | `flake` (`.`, or `github:AnkiQuest/AnkiQuest-Dev` without a flake), `flake-check`, `all-systems`, `format` (paths, empty skips), `actionlint`, `run`, `rust-cache`, `image` (`nixos/nix` on GitHub's runners), `free-disk-space`, `timeout-minutes`, `skip` |
 | `labels.yml`, `pr-labels.yml`, `issue-labels.yml` | The shared label set (`labels.json`), "Needs Review", "New contributor", area labels from the caller's `.github/labeler.yml`, "Needs Triage" | none; `ankiquest-labels.yml` is the caller every repository copies |
 
 The conflict scan ("Has Conflicts") is an action, `.github/actions/conflict-scan`, run by the caller's own job named `scan`: the rulesets require a check with that exact name, and a job that calls a reusable workflow reports as `<job> / scan`. Likewise a job calling `nix-check.yml` reports as `<job> / check`.
 
 "Needs Review" marks a pull request that waits on a reviewer: open, not a draft, not approved by another member, and with no member's change request on its current head. The rule is `.github/scripts/needs-review.cjs`; `pr-labels.yml` checks it out from master and applies it on pull request and review events, and to every open pull request on the caller's schedule and `workflow_dispatch`. Dispatching a repository's Labels workflow corrects every "Needs Review" label at once.
 
-`tests/labels.test.ts` tests the label set and the scripts:
+A change that touches only documentation skips the checks that cost time.
+The action `.github/actions/code-changed`, pinned by commit, outputs `code`:
+`'false'` only when every file the pull request, merge queue entry or push
+changed matches a docs glob (input `docs`, default `**/*.md`, `LICENSE*`,
+`LICENSES/**`, `docs/**`, `.github/ISSUE_TEMPLATE/**`,
+`.github/pull_request_template.md`; more in `extra-docs`). Other events, a
+new branch, a force push and a diff the API can't list are `'true'`. It reads
+the diff from the GitHub API, so the job needs no checkout:
+
+```yaml
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.changed.outputs.code }}
+    steps:
+      - id: changed
+        uses: AnkiQuest/AnkiQuest-Dev/.github/actions/code-changed@<commit>
+  build:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+```
+
+A job skipped by `if` counts as passing a required check, but a skipped
+matrix job or a skipped job calling a reusable workflow reports under
+another name. Keep such a job and skip its steps instead: `nix-check.yml` and
+`android-ci.yml` take `skip: ${{ needs.changes.outputs.code != 'true' }}`.
+
+`tests/labels.test.ts` tests the label set and the scripts, and
+`tests/code-changed.test.ts` the action's glob rules:
 `nix develop .#gallery -c node --experimental-strip-types --test tests/*.test.ts`.
 
 ## README banner and social preview

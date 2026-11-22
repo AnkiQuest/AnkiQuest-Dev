@@ -12,11 +12,36 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request replaces its run; pushes to master and merge
+# queue entries each keep theirs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Whether anything besides documentation changed, from this pull request's
+  # own code-changed action. The other jobs skip a docs-only change; nothing
+  # here reads the docs.
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.changed.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
+
+      - id: changed
+        uses: ./.github/actions/code-changed
+
   # Formatting and evaluation of the WSL system and every dev shell, and
   # actionlint; nothing large is built. Runs this pull request's own
   # nix-check.yml. The flake's checks include the formatting.
   flake:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/nix-check.yml
     with:
       all-systems: true
@@ -24,8 +49,11 @@ jobs:
       actionlint: true
       timeout-minutes: 20
 
-  # The label set and the reusable labelling workflows' scripts.
-  labels:
+  # The label set, the reusable labelling workflows' scripts and the
+  # code-changed action's glob rules.
+  tests:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -38,12 +66,14 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: Test the label workflows
+      - name: Test the label workflows and code-changed
         run: nix develop .#gallery -c node --experimental-strip-types --no-warnings=ExperimentalWarning --test tests/*.test.ts
 
   # The banner tool (tools/banner), a Cargo workspace of its own. The
   # flake's checks.banner runs its tests too.
   banner:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:

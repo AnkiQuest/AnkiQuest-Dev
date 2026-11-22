@@ -64,6 +64,14 @@ on:
         description: The job's timeout.
         type: number
         default: 30
+      skip:
+        description: >-
+          Report the check as passed without running it, for a change that
+          needs no check, such as `needs.changes.outputs.code != 'true'` from
+          the code-changed action. The job still reports under its name, so a
+          required check is met.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -77,30 +85,36 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
+      - name: Skip
+        if: inputs.skip
+        run: echo "Skipped at the caller's request, such as for a docs-only change."
+
       - name: Free disk space
-        if: inputs.free-disk-space
+        if: ${{ !inputs.skip && inputs.free-disk-space }}
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ !inputs.skip }}
         with:
           persist-credentials: false
 
       # The image brings its own Nix.
       - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
-        if: inputs.image == ''
+        if: ${{ !inputs.skip && (inputs.image == '') }}
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        if: inputs.rust-cache
+        if: ${{ !inputs.skip && inputs.rust-cache }}
 
       # $IN_NIX runs one command where Nix is: on the host, or in the image
       # with the checkout at /src. A named volume keeps the image's /nix,
       # and so the store, from one step to the next.
       - name: Choose where Nix runs
+        if: ${{ !inputs.skip }}
         env:
           IMAGE: ${{ inputs.image }}
         run: |
@@ -122,14 +136,14 @@ jobs:
           echo "IN_NIX=$wrapper" >> "$GITHUB_ENV"
 
       - name: Check the flake
-        if: inputs.flake-check
+        if: ${{ !inputs.skip && inputs.flake-check }}
         env:
           ALL_SYSTEMS: ${{ inputs.all-systems && '--all-systems' || '' }}
         run: |
           "$IN_NIX" "nix flake check $ALL_SYSTEMS"
 
       - name: Check the formatting
-        if: inputs.format != ''
+        if: ${{ !inputs.skip && (inputs.format != '') }}
         env:
           FLAKE: ${{ inputs.flake }}
           FORMAT: ${{ inputs.format }}
@@ -137,14 +151,14 @@ jobs:
           "$IN_NIX" "nix run '$FLAKE#formatter.'\"\$(nix eval --raw --impure --expr builtins.currentSystem)\" -- --check $FORMAT"
 
       - name: Lint the workflows
-        if: inputs.actionlint
+        if: ${{ !inputs.skip && inputs.actionlint }}
         env:
           FLAKE: ${{ inputs.flake }}
         run: |
           "$IN_NIX" "nix develop '$FLAKE' -c actionlint"
 
       - name: Run the caller's commands
-        if: inputs.run != ''
+        if: ${{ !inputs.skip && (inputs.run != '') }}
         env:
           FLAKE: ${{ inputs.flake }}
           RUN: ${{ inputs.run }}

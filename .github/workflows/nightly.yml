@@ -4,10 +4,19 @@ name: Nightly
 # nightly does: the NixOS-WSL image and the Windows configuration in the
 # rolling `nightly` pre-release, the dev images on GHCR, and the dev shells
 # in the `ankiquest` Cachix cache. Pull requests that change them, and manual
-# runs on other branches, build without pushing or publishing.
+# runs on other branches, build without pushing or publishing. A push that
+# changes only documentation builds nothing: the previous nightly stays.
+# Not a required check and not in a merge queue, so path filters are safe.
 on:
   push:
     branches: [master]
+    paths-ignore:
+      - "**/*.md"
+      - LICENSE*
+      - LICENSES/**
+      - docs/**
+      - .github/ISSUE_TEMPLATE/**
+      - .github/pull_request_template.md
   pull_request:
     paths:
       - flake.nix
