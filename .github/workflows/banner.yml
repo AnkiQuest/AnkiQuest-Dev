@@ -67,9 +67,14 @@ jobs:
           echo "::error::on-stale is \"$ON_STALE\"; use fail or report."
           exit 1
 
+      # With submodules: a caller that keeps its art in an
+      # AnkiQuest-Art submodule (AnkiQuest-Server's migration does) has
+      # the masters the banner draws from; without them the folder is
+      # empty and the drawing fails. No-op for callers without submodules.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          submodules: recursive
 
       # The pose masters, at the caller's pinned AnkiQuest-Server commit.
       - name: Read the pinned server commit
