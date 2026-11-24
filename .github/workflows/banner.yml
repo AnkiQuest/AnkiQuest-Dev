@@ -67,14 +67,34 @@ jobs:
           echo "::error::on-stale is \"$ON_STALE\"; use fail or report."
           exit 1
 
-      # With submodules: a caller that keeps its art in an
-      # AnkiQuest-Art submodule (AnkiQuest-Server's migration does) has
-      # the masters the banner draws from; without them the folder is
-      # empty and the drawing fails. No-op for callers without submodules.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          submodules: recursive
+
+      # A caller that consumes AnkiQuest-Art stages the release its
+      # ankiquest-art.json pins; the banner's duo master comes from it. No
+      # repository checks out AnkiQuest-Art as a submodule. No-op for
+      # callers without a pin.
+      - name: Stage the pinned art release
+        run: |
+          if [ ! -f ankiquest-art.json ]; then
+            exit 0
+          fi
+          pin() { node -pe "JSON.parse(require('fs').readFileSync('ankiquest-art.json','utf8'))$1"; }
+          tag=$(pin .tag)
+          base="https://github.com/AnkiQuest/AnkiQuest-Art/releases/download/$tag"
+          mkdir -p art
+          for name in masters.zip manifest.json; do
+            curl -fsSL -o "$name" "$base/$name"
+            want=$(pin ".assets['$name']")
+            got=$(sha256sum "$name" | cut -d' ' -f1)
+            if [ "$want" != "$got" ]; then
+              echo "::error::$name: SHA-256 $got, the pin expects $want"
+              exit 1
+            fi
+          done
+          unzip -qo masters.zip -d art
+          mv manifest.json art/manifest.json
 
       # The pose masters, at the caller's pinned AnkiQuest-Server commit.
       - name: Read the pinned server commit
