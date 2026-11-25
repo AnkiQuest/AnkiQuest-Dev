@@ -27,10 +27,12 @@
   ];
 
   # compileSdk across the Android repositories: 36 (AnkiQuestconnectAndroid,
-  # ankiquest-android-mcp, AnkiQuest-Android-Backend) and 37.0
-  # (AnkiQuest-Android, compileSdk 37 with compileSdkMinor 0; garmankiquest,
-  # compileSdk 37).
-  androidPlatforms = ["36" "37.0"];
+  # ankiquest-android-mcp, AnkiQuest-Android-Backend), 37.0 (garmankiquest,
+  # compileSdk 37) and 37.1 (AnkiQuest-Android, compileSdk 37 with
+  # compileSdkMinor 1). nixpkgs 26.05 (Intel Macs) has no 37.1; see README.md.
+  androidPlatforms =
+    ["36" "37.0"]
+    ++ lib.optional (system != "x86_64-darwin") "37.1";
 
   # The build tools each AGP in use defaults to (35.0.0 for AGP 8.10 and 8.13,
   # 36.0.0 for AGP 9.4 and 9.5) and SDK_BUILD_TOOLS_VERSION in
