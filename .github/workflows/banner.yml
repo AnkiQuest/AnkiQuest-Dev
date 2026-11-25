@@ -18,6 +18,8 @@
 #       uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/banner.yml@master
 #       with:
 #         server-sha-file: tests/ankiquest-server.sha
+#
+# The caller grants `contents: read`, the default; the job needs no more.
 name: Banner
 
 on:

@@ -10,6 +10,8 @@
 #       uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/android-ci.yml@master
 #       with:
 #         working-directory: android
+#
+# The caller grants `contents: read`, the default; the jobs need no more.
 name: Android CI
 
 on:
@@ -74,7 +76,7 @@ jobs:
         if: ${{ !inputs.skip }}
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
         if: ${{ !inputs.skip }}
         with:
           extra_nix_config: |

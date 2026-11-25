@@ -23,7 +23,8 @@ name: Pull Request Labels
 # Reusable: each repository calls it from pull_request_target (opened,
 # reopened, synchronize, ready_for_review, converted_to_draft, closed),
 # pull_request_review (submitted, dismissed), schedule, workflow_dispatch and
-# merge_group, and keeps its own .github/labeler.yml.
+# merge_group, and keeps its own .github/labeler.yml. The caller grants
+# `contents: read` and `pull-requests: write`.
 
 on:
   workflow_call:
@@ -42,7 +43,7 @@ jobs:
       cancel-in-progress: true
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: write # labels pull requests
     steps:
       - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
         with:
@@ -59,11 +60,11 @@ jobs:
       cancel-in-progress: true
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: write # labels pull requests
     steps:
       # The rule, from AnkiQuest-Dev's master like this workflow; never the
       # pull request's code.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: AnkiQuest/AnkiQuest-Dev
           ref: master
@@ -102,10 +103,10 @@ jobs:
       cancel-in-progress: true
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: write # labels pull requests
     steps:
       # The rule, from AnkiQuest-Dev's master like this workflow.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: AnkiQuest/AnkiQuest-Dev
           ref: master
@@ -131,7 +132,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: write # labels pull requests
     steps:
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:

@@ -9,6 +9,8 @@
 # Self-updating apps pick the asset ending in -<abi>.apk for the first entry
 # of Build.SUPPORTED_ABIS that has one, else the one ending in -universal.apk.
 #
+# The caller grants `contents: write`, to publish the release.
+#
 # The caller's Gradle task must write one APK per ABI and a universal one
 # into apk-dir, each file name containing -<abi>- or -universal-.
 #
@@ -160,7 +162,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
-      contents: write
+      contents: write # creates and deletes releases and their tags
     steps:
       - name: Check inputs
         env:

@@ -22,7 +22,7 @@ description: >-
 #         code: ${{ steps.changed.outputs.code }}
 #       steps:
 #         - id: changed
-#           uses: AnkiQuest/AnkiQuest-Dev/.github/actions/code-changed@<commit>
+#           uses: AnkiQuest/AnkiQuest-Dev/.github/actions/code-changed@master
 inputs:
   docs:
     description: Globs of documentation files, one per line. `**` spans directories, `*` and `?` do not.

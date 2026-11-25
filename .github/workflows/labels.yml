@@ -8,7 +8,8 @@ name: Label Sync
 # `aliases` is renamed, so pull requests keep it. Labels not in the file are
 # never deleted.
 #
-# Reusable: each repository calls it on a schedule and on workflow_dispatch.
+# Reusable: each repository calls it on a schedule and on workflow_dispatch,
+# granting `contents: read` and `issues: write`.
 
 on:
   workflow_call:
@@ -23,9 +24,9 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      issues: write
+      issues: write # creates and updates labels
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: AnkiQuest/AnkiQuest-Dev
           ref: master

@@ -1,0 +1,5 @@
+# Every AnkiQuest repository runs the workflows and actions under .github/
+# and the dev shells under shells/ at master, so a change to them needs a
+# review from one of the owners.
+/.github/ @float3 @AldanaBRZ
+/shells/ @float3 @AldanaBRZ

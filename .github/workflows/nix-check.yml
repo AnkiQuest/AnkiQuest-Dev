@@ -1,6 +1,6 @@
 # Reusable Nix checks for every AnkiQuest repository: `nix flake check`,
-# the formatter's check, actionlint and the caller's own commands in its
-# dev shell, with one pinned install-nix-action.
+# the formatter's check, actionlint, zizmor and the caller's own commands
+# in its dev shell, with one pinned install-nix-action.
 #
 # Call it from a workflow with the repository's own triggers:
 #   jobs:
@@ -9,6 +9,8 @@
 #       with:
 #         actionlint: true
 #         run: jq empty watched.json
+#
+# The caller grants `contents: read`, the default; the job needs no more.
 #
 # The job reports as `<caller job> / check`; a ruleset that requires the
 # caller's old job name needs the new name.
@@ -39,6 +41,13 @@ on:
         default: .
       actionlint:
         description: Lint .github/workflows with the dev shell's actionlint.
+        type: boolean
+        default: false
+      zizmor:
+        description: >-
+          Audit .github with the dev shell's zizmor, with its online audits
+          (impostor commits, known vulnerable actions) through the job's
+          token. The rules are the caller's .github/zizmor.yml.
         type: boolean
         default: false
       run:
@@ -128,7 +137,7 @@ jobs:
             cat > "$wrapper" <<EOF
           #!/usr/bin/env bash
           exec docker run --rm -v "\$PWD:/src" -w /src -v nix-check-store:/nix -e CI=true \\
-            -e NIX_CONFIG="experimental-features = nix-command flakes" \\
+            -e NIX_CONFIG="experimental-features = nix-command flakes" -e GH_TOKEN \\
             "$IMAGE" sh -euc "git config --global --add safe.directory /src; \$1"
           EOF
           fi
@@ -156,6 +165,14 @@ jobs:
           FLAKE: ${{ inputs.flake }}
         run: |
           "$IN_NIX" "nix develop '$FLAKE' -c actionlint"
+
+      - name: Audit the workflows
+        if: ${{ !inputs.skip && inputs.zizmor }}
+        env:
+          FLAKE: ${{ inputs.flake }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          "$IN_NIX" "nix develop '$FLAKE' -c zizmor --format github ."
 
       - name: Run the caller's commands
         if: ${{ !inputs.skip && (inputs.run != '') }}

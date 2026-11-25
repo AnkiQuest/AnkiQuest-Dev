@@ -14,7 +14,7 @@ container.
 | `android-backend` | AnkiQuest-Android-Backend | `android` plus NDK r28c and r29, Rust 1.99.0 (Android targets), cargo-ndk, Anki's build tools |
 | `anki` | AnkiQuest-Anki | Rust 1.99.0, Node 22, Yarn 4, protoc, uv, n2, ninja, just, rsync |
 | `gallery` | AnkiQuest.github.io | Node 22, cwebp |
-| `default` | this repository, AnkiQuest-Sync, AnkiQuest-Agents | actionlint, alejandra, gh, jq, nixd |
+| `default` | this repository, AnkiQuest-Sync, AnkiQuest-Agents | actionlint, alejandra, gh, jq, nixd, zizmor |
 
 Every version is in `shells/toolchains.nix`, next to the repository file it
 follows. The shells exist for `x86_64-linux`, `aarch64-linux`,
@@ -370,15 +370,31 @@ Workflows more than one repository runs are reusable workflows in
 | `android-ci.yml` | Gradle build, lint and unit tests with Temurin 17; `nix flake check` and a debug build in the repository's dev shell | `working-directory`, `jobs` (`gradle nix`, or one of them), `skip` |
 | `android-release.yml` | One APK per ABI (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`) and a universal one, from Gradle ABI splits, published as the `nightly` pre-release or the pushed tag's release as `<name>-<version>-<abi>.apk` and `<name>-<version>-universal.apk` with `SHA256SUMS.txt`; self-updating apps pick the first of `Build.SUPPORTED_ABIS` with an asset, else universal | `name`, `version` (empty leaves it out of the names), `release` (`nightly`, `tag`, `none`), `working-directory`, `gradle-task`, `gradle-args`, `apk-dir`, `local-properties`, `java-distribution`, `java-version`, `signing` (`debug` with secret `DEBUG_KEYSTORE`, or `apksigner` with secrets `SIGNING_KEYSTORE`, `SIGNING_KEY_PASSWORD` and `key-alias`, `rotate-from-*`, `rotate-lineage`, `rotate-min-sdk`, `cert-subject`), `expected-version-code`, `aliases`, `manifest`, `manifest-fields`, `title`, `notes`, `notes-file`, `timeout-minutes`; the caller grants `contents: write` |
 | `banner.yml` | Draws the README banner and social preview with `ankiquest-banner` and fails unless the committed images have the same pixels; uploads the drawings as the `banner` artifact | `server-sha-file` (the pinned AnkiQuest-Server commit; empty in AnkiQuest-Server), `screens-artifact` and `screens-path` (screens not committed), `on-stale` (`fail` or `report`; output `stale`) |
-| `nix-check.yml` | `nix flake check`, the formatter's check, actionlint and the caller's commands in its dev shell | `flake` (`.`, or `github:AnkiQuest/AnkiQuest-Dev` without a flake), `flake-check`, `all-systems`, `format` (paths, empty skips), `actionlint`, `run`, `rust-cache`, `image` (`nixos/nix` on GitHub's runners), `free-disk-space`, `timeout-minutes`, `skip` |
-| `labels.yml`, `pr-labels.yml`, `issue-labels.yml` | The shared label set (`labels.json`), "Needs Review", "New contributor", area labels from the caller's `.github/labeler.yml`, "Needs Triage" | none; `ankiquest-labels.yml` is the caller every repository copies |
+| `nix-check.yml` | `nix flake check`, the formatter's check, actionlint, zizmor and the caller's commands in its dev shell | `flake` (`.`, or `github:AnkiQuest/AnkiQuest-Dev` without a flake), `flake-check`, `all-systems`, `format` (paths, empty skips), `actionlint`, `zizmor` (rules in the caller's `.github/zizmor.yml`), `run`, `rust-cache`, `image` (`nixos/nix` on GitHub's runners), `free-disk-space`, `timeout-minutes`, `skip` |
+| `labels.yml`, `pr-labels.yml`, `issue-labels.yml` | The shared label set (`labels.json`), "Needs Review", "New contributor", area labels from the caller's `.github/labeler.yml`, "Needs Triage" | none; `ankiquest-labels.yml` is the caller every repository copies; the caller grants `issues: write` (`labels.yml`, `issue-labels.yml`) or `pull-requests: write` (`pr-labels.yml`) |
+
+Every AnkiQuest repository takes these workflows and actions at `master`,
+so a change here runs everywhere at once. They are kept to these rules:
+
+- Third-party actions, `actions/*` included, are pinned to a full commit
+  SHA with the release in a comment; Dependabot (`.github/dependabot.yml`)
+  proposes new SHAs weekly, a week after each release.
+- Every workflow sets `permissions: contents: read` at the top and widens
+  it per job; each reusable workflow names what its caller grants.
+- `run:` steps take inputs, event fields and secrets through `env:`, never
+  through `${{ }}` in the script. Checkouts set `persist-credentials:
+  false`, and no `pull_request_target` job checks out pull request code.
+- CI runs zizmor (`zizmor / check`) next to actionlint, with the rules in
+  `.github/zizmor.yml`.
+- `.github/CODEOWNERS` asks hill or Aldana to review every change to
+  `.github/` and `shells/`.
 
 The conflict scan ("Has Conflicts") is an action, `.github/actions/conflict-scan`, run by the caller's own job named `scan`: the rulesets require a check with that exact name, and a job that calls a reusable workflow reports as `<job> / scan`. Likewise a job calling `nix-check.yml` reports as `<job> / check`.
 
 "Needs Review" marks a pull request that waits on a reviewer: open, not a draft, not approved by another member, and with no member's change request on its current head. The rule is `.github/scripts/needs-review.cjs`; `pr-labels.yml` checks it out from master and applies it on pull request and review events, and to every open pull request on the caller's schedule and `workflow_dispatch`. Dispatching a repository's Labels workflow corrects every "Needs Review" label at once.
 
 A change that touches only documentation skips the checks that cost time.
-The action `.github/actions/code-changed`, pinned by commit, outputs `code`:
+The action `.github/actions/code-changed` outputs `code`:
 `'false'` only when every file the pull request, merge queue entry or push
 changed matches a docs glob (input `docs`, default `**/*.md`, `LICENSE*`,
 `LICENSES/**`, `docs/**`, `.github/ISSUE_TEMPLATE/**`,
@@ -394,7 +410,7 @@ jobs:
       code: ${{ steps.changed.outputs.code }}
     steps:
       - id: changed
-        uses: AnkiQuest/AnkiQuest-Dev/.github/actions/code-changed@<commit>
+        uses: AnkiQuest/AnkiQuest-Dev/.github/actions/code-changed@master
   build:
     needs: changes
     if: needs.changes.outputs.code == 'true'
