@@ -4,7 +4,9 @@ name: Issue Labels
 # that label once the issue gets another label or is closed.
 #
 # Reusable: each repository calls it on issues (opened, reopened, labeled,
-# closed), granting `contents: read` and `issues: write`.
+# closed), granting `contents: read` and `issues: write`. No concurrency
+# group, for the reasons pr-labels.yml gives: each run reads the issue from
+# the API and changes its label idempotently.
 
 on:
   workflow_call:
@@ -16,27 +18,34 @@ jobs:
   triage:
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       issues: write # labels issues
     steps:
+      # The label calls, from AnkiQuest-Dev's master like this workflow.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: AnkiQuest/AnkiQuest-Dev
+          ref: master
+          path: ankiquest-dev
+          persist-credentials: false
+          sparse-checkout: .github/scripts/
+          sparse-checkout-cone-mode: false
+
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
-          retries: 3
+          retries: 5
           script: |
+            const { addLabel, removeLabel, hasLabel } = require('./ankiquest-dev/.github/scripts/labels.cjs');
             const LABEL = 'Needs Triage';
             const { owner, repo } = context.repo;
-            const issue = context.payload.issue;
-            const issue_number = issue.number;
-            // Label names are case-insensitive on GitHub.
-            const names = issue.labels.map((label) => label.name.toLowerCase());
-            const has = names.includes(LABEL.toLowerCase());
-            const untriaged = issue.state === 'open' && names.every((name) => name === LABEL.toLowerCase());
 
-            if (untriaged && !has && ['opened', 'reopened'].includes(context.payload.action)) {
-              await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [LABEL] });
-            } else if (!untriaged && has) {
-              try {
-                await github.rest.issues.removeLabel({ owner, repo, issue_number, name: LABEL });
-              } catch (error) {
-                if (error.status !== 404) throw error;
-              }
+            // Read the issue now: the payload of a delayed run can be stale.
+            const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: context.payload.issue.number });
+            const target = { github, core, owner, repo, issue_number: issue.number, labels: issue.labels, name: LABEL };
+            const untriaged = issue.state === 'open' && issue.labels.every((label) => hasLabel([label], LABEL));
+
+            if (untriaged && ['opened', 'reopened'].includes(context.payload.action)) {
+              await addLabel(target);
+            } else if (!untriaged) {
+              await removeLabel(target);
             }

@@ -5,6 +5,8 @@
 // It reads the pull request and its reviews from the GitHub API and never
 // checks out or runs pull request code.
 
+const {Outcome, addLabel, removeLabel, transient} = require('./labels.cjs');
+
 const LABEL = 'Needs Review';
 const CONFLICTS = 'Has Conflicts';
 
@@ -66,52 +68,65 @@ function reviewState(pr, reviews) {
   return State.NEEDS_REVIEW;
 }
 
-// Reads one pull request's reviews and sets its labels to match its state.
-// `pr` is a pull request object from the API, read just before.
-async function syncLabels({github, core, owner, repo, pr}) {
-  const issue_number = pr.number;
-
-  // Label names are case-insensitive on GitHub.
-  const has = (name) => pr.labels.some((label) => label.name.toLowerCase() === name.toLowerCase());
-
-  async function add(name) {
-    if (has(name)) {
-      return;
-    }
-    core.info(`#${issue_number}: adding "${name}"`);
-    await github.rest.issues.addLabels({owner, repo, issue_number, labels: [name]});
-  }
-
-  async function remove(name) {
-    if (!has(name)) {
-      return;
-    }
-    core.info(`#${issue_number}: removing "${name}"`);
-    try {
-      await github.rest.issues.removeLabel({owner, repo, issue_number, name});
-    } catch (error) {
-      if (error.status !== 404) {
-        throw error;
-      }
-    }
-  }
-
+// Sets the labels of one pull request to match its state, once. Returns
+// the state and whether the labels were already right.
+async function applyOnce({github, core, owner, repo, pr}) {
+  const target = {github, core, owner, repo, issue_number: pr.number, labels: pr.labels};
   const reviews = await github.paginate(github.rest.pulls.listReviews, {owner, repo, pull_number: pr.number, per_page: 100});
   const state = reviewState(pr, reviews);
-  core.info(`#${issue_number}: ${state}`);
+  core.info(`#${pr.number}: ${state}`);
 
   // Closed pull requests keep no workflow labels.
+  const outcomes = [];
   if (state === State.CLOSED) {
-    await remove(LABEL);
-    await remove(CONFLICTS);
-    return state;
+    outcomes.push(await removeLabel({...target, name: LABEL}));
+    outcomes.push(await removeLabel({...target, name: CONFLICTS}));
+  } else if (state === State.NEEDS_REVIEW) {
+    outcomes.push(await addLabel({...target, name: LABEL}));
+  } else {
+    outcomes.push(await removeLabel({...target, name: LABEL}));
   }
-  if (state === State.NEEDS_REVIEW) {
-    await add(LABEL);
-    return state;
-  }
-  await remove(LABEL);
-  return state;
+  return {state, settled: outcomes.every((outcome) => outcome === Outcome.UNCHANGED)};
 }
 
-module.exports = {LABEL, State, reviewState, syncLabels};
+// How often one run reads the pull request and applies its state.
+const MAX_PASSES = 3;
+
+// Sets one pull request's labels to match its state. `pr` is a pull request
+// object from the API, read just before.
+//
+// Runs for the same pull request may overlap and one may write labels from
+// an older read. So after a change the run reads the pull request again and
+// repeats until a pass changes nothing: the last write on a pull request is
+// always followed by a read of its current state.
+//
+// A read that GitHub keeps failing after the retries is reported, not
+// thrown, so the job leaves no failed check; the result is then null.
+async function syncLabels({github, core, owner, repo, pr}) {
+  try {
+    return await settle({github, core, owner, repo, pr});
+  } catch (error) {
+    if (!transient(error)) {
+      throw error;
+    }
+    core.warning(`#${pr.number}: GitHub failed (${error.status}: ${error.message}); the next run or the sweep sets the labels`);
+    return null;
+  }
+}
+
+async function settle({github, core, owner, repo, pr}) {
+  let current = pr;
+  for (let pass = 1; ; pass++) {
+    const {state, settled} = await applyOnce({github, core, owner, repo, pr: current});
+    if (settled) {
+      return state;
+    }
+    if (pass === MAX_PASSES) {
+      core.warning(`#${pr.number}: labels not settled after ${MAX_PASSES} passes; the next run or the sweep sets them`);
+      return state;
+    }
+    ({data: current} = await github.rest.pulls.get({owner, repo, pull_number: pr.number}));
+  }
+}
+
+module.exports = {LABEL, MAX_PASSES, State, reviewState, syncLabels};
