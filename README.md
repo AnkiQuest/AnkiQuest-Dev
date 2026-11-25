@@ -9,7 +9,7 @@ container.
 |---|---|---|
 | `server` | AnkiQuest-Server | Rust 1.100.0 (wasm32 and Android targets), cargo-ndk, Node 22, esbuild, wasm-ld, SQLite, Python 3.13, uv, JBR 21, Gradle 9 |
 | `desktop` | AnkiQuest-Desktop | Rust 1.100.0, Python 3.12, pyflakes, uv, Node 22 |
-| `android` | AnkiQuest-Android, AnkiQuest-Android-MCP, AnkiQuest-AnkiConnectAndroid, AnkiQuest-GarmAnki (`android/`) | JBR 21, Android SDK (platforms 36, 37.0; build tools 35.0.0, 36.0.0, 37.0.0), Node 22 |
+| `android` | AnkiQuest-Android, AnkiQuest-Android-MCP, AnkiQuest-AnkiConnectAndroid, AnkiQuest-GarmAnki (`android/`) | JBR 21, Android SDK (platforms 36, 37.0, 37.1; build tools 35.0.0, 36.0.0, 37.0.0), Node 22 |
 | `android-emulator` | the same | `android` plus the emulator and an Android 36 system image |
 | `android-backend` | AnkiQuest-Android-Backend | `android` plus NDK r28c and r29, Rust 1.99.0 (Android targets), cargo-ndk, Anki's build tools |
 | `anki` | AnkiQuest-Anki | Rust 1.99.0, Node 22, Yarn 4, protoc, uv, n2, ninja, just, rsync |
@@ -100,6 +100,9 @@ there: Rust 1.100.0 and 1.99.0, platforms 36 and 37.0, build tools 35.0.0 to
   entry with `arch = "osx-x64"` and the hash `nix build .#jbr` reports.
 - Other tools (gh, uv, esbuild, Gradle) are 26.05's versions, not the
   unstable ones the other systems get.
+- No SDK platform 37.1: 26.05's `androidenv` stops at 37.0, so
+  AnkiQuest-Android (`compileSdk` 37.1) does not build in the Intel Mac
+  shell.
 - When 26.05 goes out of support, `x86_64-darwin` and the input are removed;
   Intel Macs then use the dev container.
 
