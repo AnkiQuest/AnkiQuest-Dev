@@ -201,9 +201,10 @@ test('the caller runs the conflict scan in a job named scan', () => {
   assert.doesNotMatch(job[1], /^ {4}uses:/m);
 });
 
-// The `on:` types of one trigger in the pull request labels workflow.
+// The `on:` types of one trigger in the pull request labels workflow; the
+// trigger's line may end in a comment, such as a zizmor ignore.
 function eventTypes(event: string): string[] {
-  const types = read(CALLER).match(new RegExp(`${event}:\\n\\s+types: \\[([^\\]]+)\\]`));
+  const types = read(CALLER).match(new RegExp(`${event}:(?: #.*)?\\n\\s+types: \\[([^\\]]+)\\]`));
   assert.ok(types, `no ${event} types`);
   return types[1].split(/,\s*/);
 }

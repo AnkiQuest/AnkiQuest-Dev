@@ -28,7 +28,7 @@ jobs:
     outputs:
       code: ${{ steps.changed.outputs.code }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: .github/actions
@@ -49,6 +49,18 @@ jobs:
       actionlint: true
       timeout-minutes: 20
 
+  # zizmor's security audit of the workflows and actions, a check of its
+  # own so a ruleset can require it. It reports as `zizmor / check`.
+  zizmor:
+    needs: changes
+    uses: ./.github/workflows/nix-check.yml
+    with:
+      flake-check: false
+      format: ""
+      zizmor: true
+      skip: ${{ needs.changes.outputs.code != 'true' }}
+      timeout-minutes: 15
+
   # The label set, the reusable labelling workflows' scripts and the
   # code-changed action's glob rules.
   tests:
@@ -57,11 +69,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
@@ -80,7 +92,7 @@ jobs:
       run:
         working-directory: tools/banner
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 

@@ -106,9 +106,9 @@
       });
 in {
   # This repository, AnkiQuest-Sync and AnkiQuest-Agents: Nix, workflows
-  # and the GitHub CLI.
+  # (actionlint, zizmor) and the GitHub CLI.
   default = pkgs.mkShell {
-    packages = with pkgs; [actionlint alejandra gh jq nixd];
+    packages = with pkgs; [actionlint alejandra gh jq nixd zizmor];
   };
 
   # AnkiQuest.github.io: the gallery build (Node 22.18 or later, cwebp for
