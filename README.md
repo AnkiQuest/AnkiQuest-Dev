@@ -277,7 +277,8 @@ Without direnv: `nix develop github:AnkiQuest/AnkiQuest-Dev#android`.
   Kotlin bindings with Gradle 9.8.0; nixpkgs has 9.9.
 - **AnkiQuest-Desktop.** The add-on tests that load Anki need `aqt` in a venv:
   `uv venv --python 3.12 && uv pip install -r tests/requirements-anki-26.9.4.txt`
-  (or `--python 3.9` with `requirements-anki-23.10.txt`), then
+  (or `--python 3.9` with `requirements-anki-24.11.txt`, the oldest Anki the
+  add-on supports), then
   `.venv/bin/python -m unittest discover -s tests`. uv's CPython and the PyQt6
   wheels run through nix-ld.
 - **AnkiQuest-Android-Backend.** Its build runs `rustup target add` and
