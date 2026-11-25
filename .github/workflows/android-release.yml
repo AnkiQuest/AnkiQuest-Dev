@@ -1,6 +1,6 @@
 # Reusable APK release for every AnkiQuest Android app: builds one APK per
 # ABI and a universal one with Gradle ABI splits, signs them, and publishes
-# them as the "nightly" pre-release (replacing the previous one) or as the
+# them as the "nightly" pre-release (updated in place) or as the
 # release of the pushed tag. Asset names are fixed:
 #   <name>-<version>-<abi>.apk        for arm64-v8a, armeabi-v7a, x86_64, x86
 #   <name>-<version>-universal.apk
@@ -40,7 +40,7 @@ on:
         default: nightly
       release:
         description: >-
-          nightly: replace the "nightly" pre-release. tag: create the release of
+          nightly: update the "nightly" pre-release. tag: create the release of
           the pushed tag. none: only upload the APKs as the "apks" artifact.
         type: string
         default: nightly
@@ -338,24 +338,28 @@ jobs:
           sha256sum -- * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: Publish the nightly release
+      - name: Nightly title and notes
+        id: nightly
         if: inputs.release == 'nightly' && (inputs.signing == 'debug' || steps.sign.outputs.signed == 'true')
         env:
-          GH_TOKEN: ${{ github.token }}
           TITLE: ${{ inputs.title }}
           NOTES: ${{ inputs.notes }}
           NOTES_FILE: ${{ inputs.notes-file }}
           BRANCH: ${{ github.ref_name }}
         run: |
-          title="${TITLE:-Nightly (${GITHUB_SHA::7})}"
+          echo "title=${TITLE:-Nightly (${GITHUB_SHA::7})}" >> "$GITHUB_OUTPUT"
           notes="${NOTES:-Build of $GITHUB_SHA from $BRANCH, built $(date -u '+%Y-%m-%d %H:%M UTC'). Replaced on every push to $BRANCH.}"
           [ -z "$NOTES_FILE" ] || notes="$(cat "$NOTES_FILE")"
-          gh release delete nightly --cleanup-tag --yes || true
-          gh release create nightly dist/* \
-            --prerelease --latest=false \
-            --target "$GITHUB_SHA" \
-            --title "$title" \
-            --notes "$notes"
+          printf '%s\n' "$notes" > "$RUNNER_TEMP/nightly-notes.md"
+
+      # Updates the release in place and retries the release API; see the action.
+      - name: Publish the nightly release
+        if: steps.nightly.outcome == 'success'
+        uses: AnkiQuest/AnkiQuest-Dev/.github/actions/nightly-release@master
+        with:
+          title: ${{ steps.nightly.outputs.title }}
+          notes-file: ${{ runner.temp }}/nightly-notes.md
+          files: dist/*
 
       - name: Publish the tag's release
         if: inputs.release == 'tag'

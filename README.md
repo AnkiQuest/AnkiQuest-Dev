@@ -421,8 +421,29 @@ matrix job or a skipped job calling a reusable workflow reports under
 another name. Keep such a job and skip its steps instead: `nix-check.yml` and
 `android-ci.yml` take `skip: ${{ needs.changes.outputs.code != 'true' }}`.
 
-`tests/labels.test.ts` tests the label set and the scripts, and
-`tests/code-changed.test.ts` the action's glob rules:
+A rolling pre-release such as `nightly` is published with the action
+`.github/actions/nightly-release` (inputs `title`, `files`, one path or glob
+per line, `notes` or `notes-file`, `tag`, default `nightly`). It updates the
+release in place instead of deleting and recreating it: it moves the tag to
+the commit, sets title and notes, uploads the files with `--clobber` and
+deletes assets that are no longer built, retrying each API call with
+backoff. The job needs `contents: write`. `android-release.yml` and
+`nightly.yml` use it, as do AnkiQuest-Desktop's and AnkiQuest-Android's
+nightlies.
+
+```yaml
+- uses: AnkiQuest/AnkiQuest-Dev/.github/actions/nightly-release@master
+  with:
+    title: AnkiQuest nightly
+    notes: Built from ${{ github.sha }}.
+    files: |
+      AnkiQuest.apk
+      nightly.json
+```
+
+`tests/labels.test.ts` tests the label set and the scripts,
+`tests/code-changed.test.ts` the action's glob rules and
+`tests/nightly-release.test.ts` the nightly release against a fake `gh`:
 `nix develop .#gallery -c node --experimental-strip-types --test tests/*.test.ts`.
 
 ## README banner and social preview
