@@ -1,7 +1,8 @@
 // The shared label set in labels.json is valid and holds every label the
 // reusable workflows and Dependabot apply. needs-review.cjs keeps "Needs
 // Review" on pull requests that wait on a reviewer, from the status and sweep
-// jobs. The caller, ankiquest-labels.yml, is the one every repository copies.
+// jobs; labels.cjs makes the label calls every label job shares. The caller,
+// ankiquest-labels.yml, is the one every repository copies.
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createRequire} from 'node:module';
@@ -20,7 +21,9 @@ const labels = JSON.parse(fs.readFileSync(path.join(root, 'labels.json'), 'utf8'
 const RULE = path.join(root, '.github', 'scripts', 'needs-review.cjs');
 const CHECKOUT = './ankiquest-dev/';
 const nodeRequire = createRequire(import.meta.url);
-const {State, reviewState} = nodeRequire(RULE);
+const {MAX_PASSES, State, reviewState, syncLabels} = nodeRequire(RULE);
+const CALLS = path.join(root, '.github', 'scripts', 'labels.cjs');
+const {Outcome, addLabel, removeLabel} = nodeRequire(CALLS);
 
 // GitHub's limits for a label, and the labels Dependabot adds by default for
 // the ecosystems in .github/dependabot.yml.
@@ -74,6 +77,11 @@ function jobScript(file: string, job: string): string {
 }
 
 interface Call {action: string; labels: string[]; number?: number}
+
+// An HTTP error as Octokit throws it.
+function httpError(status: number, message = `HTTP ${status}`) {
+  return Object.assign(new Error(message), {status, response: {headers: {}}});
+}
 // A review's commit is the pull request's head unless it says otherwise.
 interface Review {login: string; state: string; association?: string; commit?: string}
 
@@ -122,12 +130,16 @@ async function runAll(job: string, pulls: Pull[], association = 'MEMBER'): Promi
   const pull = pulls[0] ?? {action: ''};
   const served = pulls.map(item => pullRequest(item, association));
   const find = (number: number) => served.find(item => item.pr.number === number)!;
+  // The fake keeps each pull request's labels, as GitHub does.
   const issues = {
     addLabels: async (args: {issue_number: number; labels: string[]}) => {
       calls.push({action: 'add', labels: args.labels, ...number(args.issue_number)});
+      find(args.issue_number).pr.labels.push(...args.labels.map(name => ({name})));
     },
     removeLabel: async (args: {issue_number: number; name: string}) => {
       calls.push({action: 'remove', labels: [args.name], ...number(args.issue_number)});
+      const pr = find(args.issue_number).pr;
+      pr.labels = pr.labels.filter(label => label.name.toLowerCase() !== args.name.toLowerCase());
     },
   };
   // Calls name their pull request only when the job serves several.
@@ -135,11 +147,11 @@ async function runAll(job: string, pulls: Pull[], association = 'MEMBER'): Promi
   const api = {
     get: async (args: {pull_number: number}) => {
       assert.ok(!(pull.event === 'pull_request_review' && pull.fork), 'read-only run called the API');
-      return {data: find(args.pull_number).pr};
+      return {data: structuredClone(find(args.pull_number).pr)};
     },
     list: async (args: {state: string}) => {
       assert.equal(args.state, 'open');
-      return {data: served.map(item => item.pr).filter(pr => pr.state === 'open')};
+      return {data: structuredClone(served.map(item => item.pr).filter(pr => pr.state === 'open'))};
     },
     listReviews: async (args: {pull_number: number}) => ({data: find(args.pull_number).reviews}),
   };
@@ -147,9 +159,9 @@ async function runAll(job: string, pulls: Pull[], association = 'MEMBER'): Promi
   const context = {
     repo: REPO,
     eventName: pull.event ?? 'pull_request_target',
-    payload: {action: pull.action, pull_request: served[0]?.pr},
+    payload: {action: pull.action, pull_request: structuredClone(served[0]?.pr)},
   };
-  const core = {info: () => {}, notice: () => {}};
+  const core = {info: () => {}, notice: () => {}, warning: () => {}};
   const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
   const script = jobScript(PULL_REQUESTS, job);
   const github = {rest: {issues, pulls: api}, paginate};
@@ -207,15 +219,6 @@ function eventTypes(event: string): string[] {
   const types = read(CALLER).match(new RegExp(`${event}:(?: #.*)?\\n\\s+types: \\[([^\\]]+)\\]`));
   assert.ok(types, `no ${event} types`);
   return types[1].split(/,\s*/);
-}
-
-// The settings of one job's concurrency block.
-function jobConcurrency(job: string): {group?: string; cancel?: string} {
-  const text = read(PULL_REQUESTS);
-  const block = text.slice(text.indexOf(`\n  ${job}:\n`)).match(/\n {4}concurrency:\n((?: {6}.*\n)+)/);
-  assert.ok(block, `job ${job} has no concurrency`);
-  const value = (key: string) => block[1].match(new RegExp(`^ {6}${key}: (.*)$`, 'm'))?.[1];
-  return {group: value('group'), cancel: value('cancel-in-progress')};
 }
 
 const add = {action: 'add', labels: ['Needs Review']};
@@ -329,15 +332,13 @@ test('New contributor goes on a newcomer\'s first pull request', async () => {
   assert.deepEqual(await run('newcomer', {action: 'opened'}, 'MEMBER'), []);
 });
 
-test('a newer event cancels an older status run of the same pull request', () => {
-  for (const job of ['area', 'status']) {
-    const {group, cancel} = jobConcurrency(job);
-    assert.equal(cancel, 'true', job);
-    assert.match(group ?? '', /github\.event\.pull_request\.number/, job);
+test('no label run is ever cancelled by a concurrency group', () => {
+  // GitHub cancels queued runs of a group even without cancel-in-progress,
+  // and a cancelled run stays on the head commit as a failed check.
+  for (const file of labellingWorkflows()) {
+    assert.doesNotMatch(read(file), /^\s*concurrency:/m, file);
   }
-
-  // Skipped fork review runs must not cancel a run that can label.
-  assert.match(jobConcurrency('status').group ?? '', /pull_request_review/);
+  assert.doesNotMatch(fs.readFileSync(CONFLICT_SCAN, 'utf8'), /concurrency:/);
 });
 
 // The state of one pull request under the rule.
@@ -411,9 +412,10 @@ test('the caller sweeps on schedule and workflow_dispatch', () => {
   assert.match(read(PULL_REQUESTS), /\n {2}sweep:\n {4}if: github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\n/);
 });
 
-test('the status and sweep jobs load the rule from AnkiQuest-Dev, never pull request code', () => {
+test('the label jobs load their scripts from AnkiQuest-Dev, never pull request code', () => {
   const text = read(PULL_REQUESTS);
-  for (const job of ['status', 'sweep']) {
+  const scripts = {status: 'needs-review', sweep: 'needs-review', newcomer: 'labels'};
+  for (const [job, script] of Object.entries(scripts)) {
     // The job runs up to the next job's header.
     const start = text.indexOf(`\n  ${job}:\n`);
     const next = text.slice(start + 1).search(/\n {2}[a-z-]+:\n/);
@@ -424,6 +426,124 @@ test('the status and sweep jobs load the rule from AnkiQuest-Dev, never pull req
     assert.match(checkout[1], /ref: master\n/, job);
     assert.match(checkout[1], /path: ankiquest-dev\n/, job);
     assert.match(checkout[1], /persist-credentials: false\n/, job);
-    assert.match(jobScript(PULL_REQUESTS, job), /require\('\.\/ankiquest-dev\/\.github\/scripts\/needs-review\.cjs'\)/, job);
+    assert.match(checkout[1], /sparse-checkout: \.github\/scripts\/\n/, job);
+    assert.match(jobScript(PULL_REQUESTS, job), new RegExp(`require\\('\\./ankiquest-dev/\\.github/scripts/${script}\\.cjs'\\)`), job);
   }
+});
+
+// A fake GitHub API for one pull request whose label calls fail as `fail`
+// says, and the calls and warnings a sync makes against it.
+function flaky(labels: string[], fail: (call: number) => Error | null) {
+  const pr = {...pullRequest({action: '', labels}).pr};
+  const calls: string[] = [];
+  const warnings: string[] = [];
+  const attempt = (action: string, apply: () => void) => {
+    calls.push(action);
+    const error = fail(calls.length);
+    if (error) {
+      throw error;
+    }
+    apply();
+  };
+  const github = {
+    rest: {
+      issues: {
+        addLabels: async (args: {labels: string[]}) =>
+          attempt('add', () => pr.labels.push(...args.labels.map(name => ({name})))),
+        removeLabel: async (args: {name: string}) =>
+          attempt('remove', () => { pr.labels = pr.labels.filter(label => label.name !== args.name); }),
+      },
+      pulls: {get: async () => ({data: structuredClone(pr)}), listReviews: async () => ({data: []})},
+    },
+    paginate: async (method: () => Promise<{data: unknown[]}>) => (await method()).data,
+  };
+  const core = {info: () => {}, warning: (text: string) => warnings.push(text)};
+  const sync = () => syncLabels({github, core, ...REPO, pr: structuredClone(pr)});
+  return {pr, calls, warnings, sync};
+}
+
+test('a 5xx that outlasts the retries is a warning, and the next pass retries it', async () => {
+  // The first add fails, the second pass reads the pull request again and
+  // adds the label.
+  const once = flaky([], call => (call === 1 ? httpError(500) : null));
+  assert.equal(await once.sync(), State.NEEDS_REVIEW);
+  assert.deepEqual(once.calls, ['add', 'add']);
+  assert.deepEqual(once.pr.labels, [{name: 'Needs Review'}]);
+
+  // A failure on every pass leaves the job green, with a warning.
+  const always = flaky([], () => httpError(502));
+  assert.equal(await always.sync(), State.NEEDS_REVIEW);
+  assert.equal(always.calls.length, MAX_PASSES);
+  assert.ok(always.warnings.some(text => /not settled/.test(text)));
+});
+
+test('a label already removed or added is no failure', async () => {
+  // Another run removed it between the read and the call.
+  const gone = flaky(['Needs Review'], () => {
+    gone.pr.labels = [];
+    return httpError(404);
+  });
+  gone.pr.draft = true;
+  assert.equal(await gone.sync(), State.DRAFT);
+  assert.deepEqual(gone.calls, ['remove']);
+  assert.deepEqual(gone.warnings, []);
+
+  const there = await addLabel({
+    github: {rest: {issues: {addLabels: async () => { throw httpError(422); }}}},
+    core: {info: () => {}}, ...REPO, issue_number: 1, labels: [], name: 'Needs Review',
+  });
+  assert.equal(there, Outcome.STALE);
+});
+
+test('other errors still fail the job', async () => {
+  const denied = flaky([], () => httpError(403, 'Resource not accessible by integration'));
+  await assert.rejects(denied.sync(), /not accessible/);
+});
+
+test('a secondary rate limit is waited out', {timeout: 5000}, async (t) => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  let tries = 0;
+  const github = {rest: {issues: {removeLabel: async () => {
+    tries++;
+    if (tries === 1) {
+      throw Object.assign(httpError(403, 'You have exceeded a secondary rate limit'), {response: {headers: {'retry-after': '1'}}});
+    }
+  }}}};
+  const pending = removeLabel({github, core: {info: () => {}}, ...REPO, issue_number: 1, labels: [{name: 'x'}], name: 'x'});
+  await new Promise(resolve => setImmediate(resolve));
+  t.mock.timers.tick(1000);
+  assert.equal(await pending, Outcome.CHANGED);
+  assert.equal(tries, 2);
+});
+
+test('an overlapping run that read an older state corrects itself', async () => {
+  // This run read the pull request before it was approved; by the time it
+  // labels, it is approved. Its second pass reads the approval and removes
+  // the label it added.
+  const {pr} = pullRequest({action: ''});
+  let reads = 0;
+  const calls: string[] = [];
+  const github = {
+    rest: {
+      issues: {
+        addLabels: async (args: {labels: string[]}) => { calls.push('add'); pr.labels.push(...args.labels.map(name => ({name}))); },
+        removeLabel: async (args: {name: string}) => { calls.push('remove'); pr.labels = pr.labels.filter(label => label.name !== args.name); },
+      },
+      pulls: {get: async () => ({data: structuredClone(pr)}), listReviews: async () => ({data: reads++ === 0 ? [] : pullRequest({action: '', reviews: [approved]}).reviews})},
+    },
+    paginate: async (method: () => Promise<{data: unknown[]}>) => (await method()).data,
+  };
+  const result = await syncLabels({github, core: {info: () => {}, warning: () => {}}, ...REPO, pr: structuredClone(pr)});
+  assert.equal(result, State.APPROVED);
+  assert.deepEqual(calls, ['add', 'remove']);
+  assert.deepEqual(pr.labels, []);
+});
+
+test('the label jobs make their label calls through labels.cjs', () => {
+  // Direct calls would fail the job on a 5xx or a label already changed.
+  const texts = [...labellingWorkflows().map(read), fs.readFileSync(CONFLICT_SCAN, 'utf8'), fs.readFileSync(RULE, 'utf8')];
+  for (const text of texts) {
+    assert.doesNotMatch(text, /rest\.issues\.(addLabels|removeLabel)\(/);
+  }
+  assert.match(fs.readFileSync(CONFLICT_SCAN, 'utf8'), /LABELS_SCRIPT: \$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/scripts\/labels\.cjs/);
 });

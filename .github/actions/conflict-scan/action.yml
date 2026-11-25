@@ -12,9 +12,13 @@ runs:
   using: composite
   steps:
     - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        # labels.cjs, in the AnkiQuest-Dev checkout this action runs from.
+        LABELS_SCRIPT: ${{ github.action_path }}/../../scripts/labels.cjs
       with:
-        retries: 3
+        retries: 5
         script: |
+          const { addLabel, removeLabel } = require(process.env.LABELS_SCRIPT);
           const LABEL = 'Has Conflicts';
           const { owner, repo } = context.repo;
           const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -32,19 +36,12 @@ runs:
               await wait(2000);
             }
 
-            // Label names are case-insensitive on GitHub.
-            const labelled = pr.labels.some((label) => label.name.toLowerCase() === LABEL.toLowerCase());
-            if (pr.mergeable === false && !labelled) {
-              core.info(`#${number}: has conflicts, adding label`);
-              await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: [LABEL] });
-            } else if (pr.mergeable === true && labelled) {
-              core.info(`#${number}: merges cleanly, removing label`);
-              try {
-                await github.rest.issues.removeLabel({ owner, repo, issue_number: number, name: LABEL });
-              } catch (error) {
-                if (error.status !== 404) throw error;
-              }
-            } else if (pr.mergeable === null) {
+            const target = { github, core, owner, repo, issue_number: number, labels: pr.labels, name: LABEL };
+            if (pr.mergeable === false) {
+              await addLabel(target);
+            } else if (pr.mergeable === true) {
+              await removeLabel(target);
+            } else {
               core.warning(`#${number}: mergeability still unknown, skipped`);
             }
           }

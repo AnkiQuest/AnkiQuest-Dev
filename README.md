@@ -393,6 +393,8 @@ The conflict scan ("Has Conflicts") is an action, `.github/actions/conflict-scan
 
 "Needs Review" marks a pull request that waits on a reviewer: open, not a draft, not approved by another member, and with no member's change request on its current head. The rule is `.github/scripts/needs-review.cjs`; `pr-labels.yml` checks it out from master and applies it on pull request and review events, and to every open pull request on the caller's schedule and `workflow_dispatch`. Dispatching a repository's Labels workflow corrects every "Needs Review" label at once.
 
+The label jobs have no concurrency group, since GitHub cancels queued runs of a group and leaves the cancelled run on the head commit as a failed check. Overlapping runs are safe: each reads the current state from the API, makes its label calls through `.github/scripts/labels.cjs` (idempotent; a 404 or 422 from a label already changed is no error) and reads again after a change. A request GitHub keeps failing after the retries is a warning; the next run or the sweep corrects it.
+
 A change that touches only documentation skips the checks that cost time.
 The action `.github/actions/code-changed` outputs `code`:
 `'false'` only when every file the pull request, merge queue entry or push
