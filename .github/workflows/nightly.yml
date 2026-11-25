@@ -316,15 +316,15 @@ jobs:
           \`\`\`
           EOF
 
-      # Recreating the release moves the tag to this commit and drops the
-      # previous nightly's assets.
+      # Updates the release in place: moves the tag to this commit and drops
+      # the previous nightly's other assets.
       - name: Publish nightly
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          gh release delete nightly --yes --cleanup-tag || true
-          gh release create nightly "$IMAGE" configuration.dsc.yaml nightly.json SHA256SUMS \
-            --prerelease --latest=false --target "$GITHUB_SHA" \
-            --title "AnkiQuest-Dev nightly" \
-            --notes-file notes.md
+        uses: AnkiQuest/AnkiQuest-Dev/.github/actions/nightly-release@master
+        with:
+          title: AnkiQuest-Dev nightly
+          notes-file: notes.md
+          files: |
+            ${{ env.IMAGE }}
+            configuration.dsc.yaml
+            nightly.json
+            SHA256SUMS

@@ -1,0 +1,51 @@
+name: Nightly release
+description: >-
+  Publishes a rolling pre-release (`nightly` by default) in place: moves its
+  tag to this commit, sets its title and notes, uploads the files and
+  deletes assets that are no longer built.
+
+# Updating the release instead of deleting and recreating it keeps its
+# download links working, and a run that fails halfway leaves a release the
+# next run can update. Every GitHub API call is retried with backoff, since
+# the release API answers 5xx now and then. The job needs contents: write.
+#
+#   - uses: AnkiQuest/AnkiQuest-Dev/.github/actions/nightly-release@master
+#     with:
+#       title: AnkiQuest nightly
+#       notes: Built from ${{ github.sha }}.
+#       files: |
+#         AnkiQuest.apk
+#         nightly.json
+inputs:
+  tag:
+    description: The release's tag.
+    default: nightly
+  title:
+    description: The release's title.
+    required: true
+  notes:
+    description: The release notes. Ignored when `notes-file` is set.
+    default: ""
+  notes-file:
+    description: A file with the release notes.
+    default: ""
+  files:
+    description: The files to publish, one path or glob per line. Their names are the asset names.
+    required: true
+  token:
+    description: The token for the GitHub API.
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        TAG: ${{ inputs.tag }}
+        TITLE: ${{ inputs.title }}
+        NOTES: ${{ inputs.notes }}
+        NOTES_FILE: ${{ inputs.notes-file }}
+        FILES: ${{ inputs.files }}
+        TARGET: ${{ github.sha }}
+      run: '"$GITHUB_ACTION_PATH/publish.sh"'
