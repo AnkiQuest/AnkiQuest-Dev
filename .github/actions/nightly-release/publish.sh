@@ -44,12 +44,20 @@ ensure() {
 # Moves the tag to $TARGET and sets the title and notes. GitHub refuses to
 # move a tag with this token past commits that change workflows, so the tag
 # is deleted and publish has the release API create it again at $TARGET.
-# The release is an untagged draft in between.
+# The release is an untagged draft in between. GitHub drafts the release in
+# the background, so publish waits until it is a draft: publishing earlier
+# lets the late draft undo it.
 move() {
-  { moved || untag; } && publish && moved
+  { moved || { untag && settle; }; } && publish && moved
 }
 untag() {
   gh api -X DELETE "$api/git/refs/tags/$TAG" || ! gh api "$api/git/ref/tags/$TAG" > /dev/null
+}
+settle() {
+  retry drafted || echo "::warning::release $id is not a draft yet; publishing anyway"
+}
+drafted() {
+  [[ $(gh api "$api/releases/$id" --jq .draft) == true ]]
 }
 publish() {
   gh api -X PATCH "$api/releases/$id" -f tag_name="$TAG" -f target_commitish="$TARGET" -f name="$TITLE" \
@@ -70,7 +78,18 @@ prune() {
   done
 }
 
+# Publishes the release again if GitHub drafted it after all, and checks
+# again after the wait.
+published() {
+  local draft
+  draft=$(gh api "$api/releases/$id" --jq .draft) || return
+  [[ $draft == false ]] && return
+  publish
+  false
+}
+
 retry ensure
 retry move
 retry gh release upload "$TAG" "${paths[@]}" --clobber
 retry prune
+retry published

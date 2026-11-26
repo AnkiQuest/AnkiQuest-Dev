@@ -432,7 +432,9 @@ per line, `notes` or `notes-file`, `tag`, default `nightly`). It updates the
 release in place instead of deleting and recreating it: it moves the tag to
 the commit, sets title and notes, uploads the files with `--clobber` and
 deletes assets that are no longer built, retrying each API call with
-backoff. The job needs `contents: write`. `android-release.yml` and
+backoff. GitHub drafts a release in the background when its tag is deleted,
+so the action publishes only once that has happened and checks that the
+release ends published. The job needs `contents: write`. `android-release.yml` and
 `nightly.yml` use it, as do AnkiQuest-Desktop's and AnkiQuest-Android's
 nightlies.
 

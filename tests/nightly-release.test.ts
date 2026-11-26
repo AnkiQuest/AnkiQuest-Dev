@@ -16,7 +16,7 @@ const NEW = 'b'.repeat(40);
 
 type Release = {id: number; tag_name: string; name: string; body: string; draft: boolean; prerelease: boolean; assets: string[]};
 type Fault = {match: string; times: number; after?: boolean};
-type State = {tags: Record<string, string>; releases: Release[]; next: number; faults: Fault[]; calls: string[]};
+type State = {tags: Record<string, string>; releases: Release[]; next: number; faults: Fault[]; calls: string[]; lag?: number};
 
 // A previous nightly at OLD with the given assets.
 function published(assets: string[]): Partial<State> {
@@ -115,6 +115,14 @@ test('picks up the untagged draft a failed run left behind', () => {
   const run = publish(left);
   assert.equal(run.status, 0, run.stderr);
   current(run.state);
+});
+
+test('a release GitHub drafts after the tag moved ends published', () => {
+  for (const lag of [1, 2, 3, 4, 5, 6]) {
+    const run = publish({...published(['a.apk', 'nightly.json']), lag});
+    assert.equal(run.status, 0, run.stderr);
+    current(run.state);
+  }
 });
 
 test('a rerun at the same commit keeps the tag', () => {

@@ -2,18 +2,31 @@
 // and tag calls publish.sh makes, against a JSON state file ($FAKE_STATE).
 // A fault in the state fails the first `times` calls whose arguments contain
 // `match`, before or (`after`) once the call took effect, as a 5xx does.
+// With `lag`, GitHub turns a deleted tag's release into a draft only that
+// many calls later, as it does in the background.
 import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 
 type Release = {id: number; tag_name: string; name: string; body: string; draft: boolean; prerelease: boolean; assets: string[]};
 type Fault = {match: string; times: number; after?: boolean};
-type State = {tags: Record<string, string>; releases: Release[]; next: number; faults: Fault[]; calls: string[]};
+type Untag = {id: number; at: number};
+type State = {tags: Record<string, string>; releases: Release[]; next: number; faults: Fault[]; calls: string[]; lag?: number; untags?: Untag[]};
 
 const file = process.env.FAKE_STATE!;
 const state: State = JSON.parse(fs.readFileSync(file, 'utf8'));
 const args = process.argv.slice(2);
 const line = args.join(' ');
 state.calls.push(line);
+
+// The background drafts of deleted tags' releases that are due by this call.
+// They apply to the release even if it was published again since.
+for (const untag of (state.untags ?? []).filter(u => u.at <= state.calls.length)) {
+  const r = state.releases.find(x => x.id === untag.id);
+  if (r) {
+    r.draft = true;
+  }
+}
+state.untags = (state.untags ?? []).filter(u => u.at > state.calls.length);
 
 // The value after a flag, and the -f/-F fields of an API call.
 function flag(name: string): string | undefined {
@@ -75,6 +88,10 @@ function run(): [number, unknown?] {
     return [201, release];
   }
   const release = path?.match(/^releases\/(\d+)$/);
+  if (args[0] === 'api' && release && method === 'GET') {
+    const r = state.releases.find(x => x.id === Number(release[1]));
+    return r ? [200, r] : [404];
+  }
   if (args[0] === 'api' && release && method === 'PATCH') {
     const r = state.releases.find(x => x.id === Number(release[1]));
     if (!r) {
@@ -93,8 +110,12 @@ function run(): [number, unknown?] {
       return [422];
     }
     delete state.tags[ref[1]];
-    // GitHub turns the tag's release into an untagged draft.
+    // GitHub turns the tag's release into an untagged draft, at once or `lag` calls later.
     for (const r of state.releases.filter(x => x.tag_name === ref[1])) {
+      if (state.lag) {
+        state.untags = [...(state.untags ?? []), {id: r.id, at: state.calls.length + state.lag}];
+        continue;
+      }
       Object.assign(r, {draft: true, tag_name: `untagged-${r.id}`});
     }
     return [204];
@@ -102,7 +123,8 @@ function run(): [number, unknown?] {
   if (args[0] === 'api' && ref && method === 'GET') {
     return ref[1] in state.tags ? [200, {object: {sha: state.tags[ref[1]]}}] : [404];
   }
-  const r = byTag(args[2]);
+  // gh's release commands also find a draft by the tag it names.
+  const r = byTag(args[2]) ?? state.releases.find(x => x.tag_name === args[2]);
   if (args[0] === 'release' && !r) {
     return [404];
   }
